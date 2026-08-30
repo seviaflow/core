@@ -20,6 +20,10 @@ composer require seviaflow/core:^0.1@dev
 
 Core depends on PHP and Illuminate components only. It does not require `seviaflow/ui`, `seviaflow/api` or `seviaflow/devtools`.
 
+## Documentation
+
+- [Semantic Analytics](docs/ANALYTICS.md): define datasets, measures, dimensions, time dimensions, and semantic queries for dashboards and Copilot.
+
 ## Local Checks
 
 ```bash
