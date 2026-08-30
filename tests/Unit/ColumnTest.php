@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use SeviaFlow\Core\Resources\Columns\BadgeColumn;
 use SeviaFlow\Core\Resources\Columns\BelongsToColumn;
+use SeviaFlow\Core\Resources\Columns\MoneyColumn;
 use SeviaFlow\Core\Resources\Columns\StatusColumn;
 use SeviaFlow\Core\Resources\Columns\Support\BadgeRenderer;
 use SeviaFlow\Core\Resources\Columns\TextColumn;
@@ -84,6 +85,13 @@ it('uses id as default belongsTo title attribute', function (): void {
         ->relationship('company');
 
     expect($column->getTitleAttribute())->toBe('id');
+});
+
+it('stores money column currency and decimals', function (): void {
+    $column = MoneyColumn::make('total')->currency('eur')->decimals(0);
+
+    expect($column->getCurrency())->toBe('EUR')
+        ->and($column->getDecimals())->toBe(0);
 });
 
 it('stores badge colors and labels', function (): void {
