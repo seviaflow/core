@@ -44,6 +44,10 @@ return [
     'forms' => [
         'default_currency' => 'USD',
     ],
+    'analytics' => [
+        'default_limit' => 20,
+        'max_limit' => 500,
+    ],
     'workflows' => [
         'enabled' => true,
     ],
