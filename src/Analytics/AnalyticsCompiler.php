@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Analytics;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
@@ -18,6 +20,8 @@ final class AnalyticsCompiler
      * @param  array<int, string>  $dimensionKeys
      * @param  array{dimension:string, grain:string, from:string|null, to:string|null}|null  $time
      * @param  array<int, AnalyticsFilter>  $filters
+     * @param  array<int, AnalyticsAggregateFilter>  $aggregateFilters
+     * @param  array<string, mixed>  $complexity
      * @param  array<int, AnalyticsOrder>  $order
      */
     public function execute(
@@ -27,8 +31,12 @@ final class AnalyticsCompiler
         array $dimensionKeys,
         ?array $time,
         array $filters,
+        array $aggregateFilters,
+        ?AnalyticsRanking $ranking,
         array $order,
         int $limit,
+        array $complexity = [],
+        ?Authenticatable $user = null,
     ): AnalyticsResult {
         $query = $this->baseQuery($dataset);
         $joins = [];
@@ -37,7 +45,7 @@ final class AnalyticsCompiler
         $timeSelection = null;
 
         $this->clearSelectedColumns($query);
-        $this->applyTimeRange($query, $dataset, $time);
+        $this->applyTimeRange($query, $dataset, $time, $joins);
 
         foreach ($filters as $filter) {
             $this->applyFilter($query, $dataset, $filter, $joins);
@@ -65,7 +73,7 @@ final class AnalyticsCompiler
 
         if ($time !== null) {
             $dimension = $dataset->timeDimension($time['dimension']);
-            $timeExpression = $this->timeExpression($query, $dimension, $time['grain']);
+            $timeExpression = $this->timeExpression($query, $dimension, $time['grain'], $joins);
             $timeAlias = $this->alias('time_'.$dimension->key().'_'.$time['grain']);
 
             $query->selectRaw($timeExpression.' as '.$this->wrap($query, $timeAlias));
@@ -77,6 +85,8 @@ final class AnalyticsCompiler
             ];
         }
 
+        $grouped = $selectedDimensions !== [] || $timeSelection !== null;
+
         foreach ($measureKeys as $measureKey) {
             $measure = $dataset->measure($measureKey);
             $measureAlias = $this->alias('measure_'.$measureKey);
@@ -86,18 +96,27 @@ final class AnalyticsCompiler
             $selectedMeasures[$measureKey] = [
                 'measure' => $measure,
                 'alias' => $measureAlias,
+                'sql' => $sql,
+                'bindings' => $bindings,
             ];
         }
 
-        $grouped = $selectedDimensions !== [] || $timeSelection !== null;
-        $this->applyOrdering($query, $dataset, $order, $selectedDimensions, $selectedMeasures, $timeSelection);
+        $this->applyAggregateFilters($query, $aggregateFilters, $selectedMeasures);
 
-        if ($grouped) {
-            $query->limit($limit);
+        if ($ranking instanceof AnalyticsRanking) {
+            $rawRows = $this->rankedRows($query, $dataset, $ranking, $selectedDimensions, $selectedMeasures, $timeSelection, $order, $limit);
+        } else {
+            $this->applyOrdering($query, $dataset, $order, $selectedDimensions, $selectedMeasures, $timeSelection);
+
+            if ($grouped) {
+                $query->limit($limit);
+            }
+
+            $rawRows = $query->get();
         }
 
         $rows = $this->normalizeRows(
-            rows: $query->get(),
+            rows: $rawRows,
             selectedDimensions: $selectedDimensions,
             selectedMeasures: $selectedMeasures,
             timeSelection: $timeSelection,
@@ -108,9 +127,11 @@ final class AnalyticsCompiler
             query: $analyticsQuery->toArray(),
             rows: $rows,
             metadata: [
-                'dataset' => $dataset->toArray(),
+                'dataset' => $dataset->toArray($user),
                 'grouped' => $grouped,
                 'limit' => $grouped ? $limit : null,
+                'ranking' => $ranking?->toArray(),
+                'complexity' => $complexity,
             ],
         );
     }
@@ -134,27 +155,28 @@ final class AnalyticsCompiler
 
     /**
      * @param  array{dimension:string, grain:string, from:string|null, to:string|null}|null  $time
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      */
-    private function applyTimeRange(Builder $query, AnalyticsDataset $dataset, ?array $time): void
+    private function applyTimeRange(Builder $query, AnalyticsDataset $dataset, ?array $time, array &$joins): void
     {
         if ($time === null) {
             return;
         }
 
         $dimension = $dataset->timeDimension($time['dimension']);
-        $column = $this->qualifiedBaseColumn($query, $dimension->fieldName());
+        $column = $this->timeFieldSql($query, $dimension, $joins);
 
         if ($time['from'] !== null) {
-            $query->whereDate($column, '>=', $time['from']);
+            $query->where($column, '>=', $time['from']);
         }
 
         if ($time['to'] !== null) {
-            $query->whereDate($column, '<=', $time['to']);
+            $query->where($column, '<', $time['to']);
         }
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      */
     private function applyFilter(Builder $query, AnalyticsDataset $dataset, AnalyticsFilter $filter, array &$joins): void
     {
@@ -164,7 +186,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      * @return array{0:string, 1:array<int, mixed>}
      */
     private function filterSql(Builder $query, AnalyticsDataset $dataset, AnalyticsFilter $filter, array &$joins): array
@@ -216,7 +238,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      */
     private function filterFieldSql(Builder $query, AnalyticsDataset $dataset, string $field, array &$joins): string
     {
@@ -225,14 +247,14 @@ final class AnalyticsCompiler
         }
 
         if ($dataset->hasTimeDimension($field)) {
-            return $this->wrap($query, $this->qualifiedBaseColumn($query, $dataset->timeDimension($field)->fieldName()));
+            return $this->wrap($query, $this->timeFieldSql($query, $dataset->timeDimension($field), $joins));
         }
 
         throw new InvalidArgumentException(sprintf('Analytics filter field [%s] is not registered on dataset [%s].', $field, $dataset->key()));
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      * @return array{
      *   value_sql:string,
      *   value_bindings:array<int, mixed>,
@@ -262,14 +284,17 @@ final class AnalyticsCompiler
             throw new InvalidArgumentException(sprintf('Analytics dimension [%s] must define field() or relationship().', $dimension->key()));
         }
 
-        $relation = $this->belongsToRelation($query->getModel(), $relationship['relationship']);
-        $alias = $this->ensureRelationshipJoin($query, $dimension, $relation, $joins);
+        $resolved = $this->ensureRelationshipPath($query, $relationship['path'], $joins);
+        $alias = $resolved['alias'];
         $relatedValue = $relationship['mode'] === 'entity'
-            ? $relation->getOwnerKeyName()
-            : $relationship['title_attribute'];
+            ? ($relationship['key_attribute'] ?? $resolved['owner_key'])
+            : $relationship['key_attribute'];
+        if (! is_string($relatedValue) || $relatedValue === '') {
+            throw new InvalidArgumentException(sprintf('Analytics dimension [%s] relationship key is not configured.', $dimension->key()));
+        }
 
         $valueSql = $this->wrap($query, $alias.'.'.$relatedValue);
-        $labelSql = $this->wrap($query, $alias.'.'.$relationship['title_attribute']);
+        $labelSql = $this->wrap($query, $alias.'.'.$relationship['label_attribute']);
         $groupSql = $relationship['mode'] === 'entity'
             ? [$valueSql, $labelSql]
             : [$valueSql];
@@ -285,25 +310,52 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<int, string>  $path
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @return array{alias:string, model:class-string<Model>, owner_key:string}
      */
-    private function ensureRelationshipJoin(Builder $query, Dimension $dimension, BelongsTo $relation, array &$joins): string
+    private function ensureRelationshipPath(Builder $query, array $path, array &$joins): array
     {
-        $relationship = $dimension->relationshipDefinition();
-        $relationshipName = $relationship['relationship'] ?? $dimension->key();
-
-        if (isset($joins[$relationshipName])) {
-            return $joins[$relationshipName];
+        if ($path === []) {
+            throw new InvalidArgumentException('Analytics relationship path cannot be empty.');
         }
 
-        $alias = $this->alias('rel_'.$relationshipName);
-        $relatedTable = $relation->getRelated()->getTable();
-        $ownerKey = $relation->getOwnerKeyName();
+        $parentModel = $query->getModel();
+        $parentTable = $parentModel->getTable();
+        $prefix = [];
+        $resolved = null;
 
-        $query->leftJoin($relatedTable.' as '.$alias, $relation->getQualifiedForeignKeyName(), '=', $alias.'.'.$ownerKey);
-        $joins[$relationshipName] = $alias;
+        foreach ($path as $relationship) {
+            $prefix[] = $relationship;
+            $joinKey = implode('.', $prefix);
 
-        return $alias;
+            if (! isset($joins[$joinKey])) {
+                $relation = $this->belongsToRelation($parentModel, $relationship);
+                $alias = $this->alias('rel_'.$joinKey);
+                $relatedTable = $relation->getRelated()->getTable();
+                $ownerKey = $relation->getOwnerKeyName();
+
+                $query->leftJoin(
+                    $relatedTable.' as '.$alias,
+                    $parentTable.'.'.$relation->getForeignKeyName(),
+                    '=',
+                    $alias.'.'.$ownerKey
+                );
+
+                $joins[$joinKey] = [
+                    'alias' => $alias,
+                    'model' => $relation->getRelated()::class,
+                    'owner_key' => $ownerKey,
+                ];
+            }
+
+            $resolved = $joins[$joinKey];
+            $parentTable = $resolved['alias'];
+            $modelClass = $resolved['model'];
+            $parentModel = new $modelClass;
+        }
+
+        return $resolved;
     }
 
     private function belongsToRelation(Model $model, string $relationship): BelongsTo
@@ -321,7 +373,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, string>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
      * @return array{0:string, 1:array<int, mixed>}
      */
     private function measureSql(Builder $query, AnalyticsDataset $dataset, Measure $measure, array &$joins): array
@@ -358,6 +410,48 @@ final class AnalyticsCompiler
             $aggregation.'(case when '.$predicateSql.' then '.$expressionSql.' else '.$thenValue.' end)',
             array_merge($bindings, $expressionBindings),
         ];
+    }
+
+    /**
+     * @param  array<int, AnalyticsAggregateFilter>  $filters
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
+     */
+    private function applyAggregateFilters(Builder $query, array $filters, array $selectedMeasures): void
+    {
+        foreach ($filters as $filter) {
+            if (! isset($selectedMeasures[$filter->measure()])) {
+                throw new InvalidArgumentException(sprintf('Analytics aggregate filter measure [%s] is not selected.', $filter->measure()));
+            }
+
+            [$sql, $bindings] = $this->comparisonSql(
+                $selectedMeasures[$filter->measure()]['sql'],
+                $filter->operator(),
+                $filter->value()
+            );
+
+            $query->havingRaw($sql, array_merge($selectedMeasures[$filter->measure()]['bindings'], $bindings));
+        }
+    }
+
+    /**
+     * @return array{0:string, 1:array<int, mixed>}
+     */
+    private function comparisonSql(string $fieldSql, string $operator, mixed $value): array
+    {
+        return match ($operator) {
+            'equals' => $value === null ? [$fieldSql.' is null', []] : [$fieldSql.' = ?', [$value]],
+            'not_equals' => $value === null ? [$fieldSql.' is not null', []] : [$fieldSql.' <> ?', [$value]],
+            'gt' => [$fieldSql.' > ?', [$value]],
+            'gte' => [$fieldSql.' >= ?', [$value]],
+            'lt' => [$fieldSql.' < ?', [$value]],
+            'lte' => [$fieldSql.' <= ?', [$value]],
+            'in' => $this->listFilterSql($fieldSql, 'in', $value),
+            'not_in' => $this->listFilterSql($fieldSql, 'not in', $value),
+            'between' => $this->betweenFilterSql($fieldSql, $value),
+            'is_null' => [$fieldSql.' is null', []],
+            'is_not_null' => [$fieldSql.' is not null', []],
+            default => throw new InvalidArgumentException(sprintf('Analytics comparison operator [%s] is not supported.', $operator)),
+        };
     }
 
     /**
@@ -432,9 +526,12 @@ final class AnalyticsCompiler
         ];
     }
 
-    private function timeExpression(Builder $query, TimeDimension $dimension, string $grain): string
+    /**
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     */
+    private function timeExpression(Builder $query, TimeDimension $dimension, string $grain, array &$joins): string
     {
-        $field = $this->wrap($query, $this->qualifiedBaseColumn($query, $dimension->fieldName()));
+        $field = $this->wrap($query, $this->timeFieldSql($query, $dimension, $joins));
         /** @var Connection $connection */
         $connection = $query->getConnection();
         $driver = $connection->getDriverName();
@@ -472,8 +569,196 @@ final class AnalyticsCompiler
     }
 
     /**
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     */
+    private function timeFieldSql(Builder $query, TimeDimension $dimension, array &$joins): string
+    {
+        $path = $dimension->relationshipPathDefinition();
+        if ($path === []) {
+            return $this->qualifiedBaseColumn($query, $dimension->fieldName());
+        }
+
+        $resolved = $this->ensureRelationshipPath($query, $path, $joins);
+
+        return $resolved['alias'].'.'.$dimension->fieldName();
+    }
+
+    /**
      * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
-     * @param  array<string, array{measure:Measure, alias:string}>  $selectedMeasures
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
+     * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
+     */
+    private function rankedRows(
+        Builder $query,
+        AnalyticsDataset $dataset,
+        AnalyticsRanking $ranking,
+        array $selectedDimensions,
+        array $selectedMeasures,
+        ?array $timeSelection,
+        array $order,
+        int $limit,
+    ): Collection {
+        if (! isset($selectedMeasures[$ranking->measure()])) {
+            throw new InvalidArgumentException(sprintf('Analytics ranking measure [%s] is not selected on dataset [%s].', $ranking->measure(), $dataset->key()));
+        }
+
+        /** @var Connection $connection */
+        $connection = $query->getConnection();
+        $baseAlias = 'sf_analytics_rank_base';
+        $rankedAlias = 'sf_analytics_ranked';
+        $rankAlias = 'sf_analytics_rank';
+
+        $windowQuery = $this->queryBuilder($connection);
+        $ranked = $this->queryBuilder($connection)
+            ->fromSub($query->toBase(), $baseAlias)
+            ->select($baseAlias.'.*')
+            ->selectRaw($this->rowNumberSql($windowQuery, $ranking, $selectedDimensions, $selectedMeasures, $timeSelection).' as '.$this->wrapBase($windowQuery, $rankAlias));
+
+        $outer = $this->queryBuilder($connection)
+            ->fromSub($ranked, $rankedAlias)
+            ->select($rankedAlias.'.*')
+            ->where($rankAlias, '<=', $ranking->limit());
+
+        $this->applyOuterOrdering($outer, $dataset, $ranking, $order, $selectedDimensions, $selectedMeasures, $timeSelection, $rankAlias);
+        $outer->limit($limit);
+
+        return $outer->get();
+    }
+
+    private function queryBuilder(Connection $connection): QueryBuilder
+    {
+        return new QueryBuilder($connection, $connection->getQueryGrammar(), $connection->getPostProcessor());
+    }
+
+    /**
+     * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
+     * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
+     */
+    private function rowNumberSql(
+        QueryBuilder $query,
+        AnalyticsRanking $ranking,
+        array $selectedDimensions,
+        array $selectedMeasures,
+        ?array $timeSelection,
+    ): string {
+        $partition = $this->rankingPartitionAliases($ranking, $selectedDimensions, $timeSelection);
+        $partitionSql = $partition === []
+            ? ''
+            : 'partition by '.implode(', ', array_map(fn (string $alias): string => $this->wrapBase($query, $alias), $partition)).' ';
+
+        $orderParts = [
+            $this->wrapBase($query, $selectedMeasures[$ranking->measure()]['alias']).' '.$ranking->direction(),
+        ];
+
+        foreach ($selectedDimensions as $key => $selection) {
+            if (! in_array($selection['value_alias'], $partition, true)) {
+                $orderParts[] = $this->wrapBase($query, $selection['label_alias']).' asc';
+            }
+        }
+
+        if ($timeSelection !== null && ! in_array($timeSelection['alias'], $partition, true)) {
+            $orderParts[] = $this->wrapBase($query, $timeSelection['alias']).' asc';
+        }
+
+        return 'row_number() over ('.$partitionSql.'order by '.implode(', ', array_values(array_unique($orderParts))).')';
+    }
+
+    /**
+     * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
+     * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
+     * @return array<int, string>
+     */
+    private function rankingPartitionAliases(AnalyticsRanking $ranking, array $selectedDimensions, ?array $timeSelection): array
+    {
+        $aliases = [];
+
+        foreach ($ranking->partitionBy() as $partition) {
+            if (AnalyticsRanking::isTimeToken($partition)) {
+                if ($timeSelection !== null) {
+                    $aliases[] = $timeSelection['alias'];
+                }
+
+                continue;
+            }
+
+            if (isset($selectedDimensions[$partition])) {
+                $aliases[] = $selectedDimensions[$partition]['value_alias'];
+
+                continue;
+            }
+
+            if ($timeSelection !== null && $partition === $timeSelection['dimension']->key()) {
+                $aliases[] = $timeSelection['alias'];
+            }
+        }
+
+        return array_values(array_unique($aliases));
+    }
+
+    /**
+     * @param  array<int, AnalyticsOrder>  $order
+     * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
+     * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
+     */
+    private function applyOuterOrdering(
+        QueryBuilder $query,
+        AnalyticsDataset $dataset,
+        AnalyticsRanking $ranking,
+        array $order,
+        array $selectedDimensions,
+        array $selectedMeasures,
+        ?array $timeSelection,
+        string $rankAlias,
+    ): void {
+        if ($order === []) {
+            foreach ($ranking->partitionBy() as $partition) {
+                if (isset($selectedDimensions[$partition])) {
+                    $query->orderBy($selectedDimensions[$partition]['label_alias']);
+
+                    continue;
+                }
+
+                if (($partition === '$time' || ($timeSelection !== null && $partition === $timeSelection['dimension']->key())) && $timeSelection !== null) {
+                    $query->orderBy($timeSelection['alias']);
+                }
+            }
+
+            $query->orderBy($rankAlias);
+
+            return;
+        }
+
+        foreach ($order as $orderItem) {
+            $field = $orderItem->field();
+
+            if (isset($selectedMeasures[$field])) {
+                $query->orderBy($selectedMeasures[$field]['alias'], $orderItem->direction());
+
+                continue;
+            }
+
+            if (isset($selectedDimensions[$field])) {
+                $query->orderBy($selectedDimensions[$field]['label_alias'], $orderItem->direction());
+
+                continue;
+            }
+
+            if ($timeSelection !== null && $field === $timeSelection['dimension']->key()) {
+                $query->orderBy($timeSelection['alias'], $orderItem->direction());
+
+                continue;
+            }
+
+            throw new InvalidArgumentException(sprintf('Analytics order field [%s] is not selected on dataset [%s].', $field, $dataset->key()));
+        }
+    }
+
+    /**
+     * @param  array<int, AnalyticsOrder>  $order
+     * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
      * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
      */
     private function applyOrdering(
@@ -525,20 +810,20 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  Collection<int, Model>  $rows
+     * @param  Collection<int, mixed>  $rows
      * @param  array<string, array{dimension:Dimension, value_alias:string, label_alias:string}>  $selectedDimensions
-     * @param  array<string, array{measure:Measure, alias:string}>  $selectedMeasures
+     * @param  array<string, array{measure:Measure, alias:string, sql:string, bindings:array<int, mixed>}>  $selectedMeasures
      * @param  array{dimension:TimeDimension, grain:string, alias:string}|null  $timeSelection
      * @return array<int, array{dimensions:array<string, array{value:mixed,label:string}>, time:array{dimension:string,grain:string,value:mixed,label:string}|null, measures:array<string, int|float|null>}>
      */
     private function normalizeRows(Collection $rows, array $selectedDimensions, array $selectedMeasures, ?array $timeSelection): array
     {
         return $rows
-            ->map(function (Model $row) use ($selectedDimensions, $selectedMeasures, $timeSelection): array {
+            ->map(function (mixed $row) use ($selectedDimensions, $selectedMeasures, $timeSelection): array {
                 $dimensions = [];
                 foreach ($selectedDimensions as $key => $selection) {
-                    $value = $row->getAttribute($selection['value_alias']);
-                    $label = $selection['dimension']->displayLabel($value, $row->getAttribute($selection['label_alias']));
+                    $value = $this->rowAttribute($row, $selection['value_alias']);
+                    $label = $selection['dimension']->displayLabel($value, $this->rowAttribute($row, $selection['label_alias']));
                     $dimensions[$key] = [
                         'value' => $value,
                         'label' => $label,
@@ -547,7 +832,7 @@ final class AnalyticsCompiler
 
                 $time = null;
                 if ($timeSelection !== null) {
-                    $value = $row->getAttribute($timeSelection['alias']);
+                    $value = $this->rowAttribute($row, $timeSelection['alias']);
                     $time = [
                         'dimension' => $timeSelection['dimension']->key(),
                         'grain' => $timeSelection['grain'],
@@ -558,7 +843,7 @@ final class AnalyticsCompiler
 
                 $measures = [];
                 foreach ($selectedMeasures as $key => $selection) {
-                    $value = $row->getAttribute($selection['alias']);
+                    $value = $this->rowAttribute($row, $selection['alias']);
                     $measures[$key] = $this->normalizeMeasureValue($selection['measure'], $value);
                 }
 
@@ -570,6 +855,23 @@ final class AnalyticsCompiler
             })
             ->values()
             ->all();
+    }
+
+    private function rowAttribute(mixed $row, string $attribute): mixed
+    {
+        if ($row instanceof Model) {
+            return $row->getAttribute($attribute);
+        }
+
+        if (is_array($row)) {
+            return $row[$attribute] ?? null;
+        }
+
+        if (is_object($row) && property_exists($row, $attribute)) {
+            return $row->{$attribute};
+        }
+
+        return null;
     }
 
     private function normalizeMeasureValue(Measure $measure, mixed $value): int|float|null
@@ -595,8 +897,16 @@ final class AnalyticsCompiler
         return $query->getQuery()->getGrammar()->wrap($identifier);
     }
 
+    private function wrapBase(QueryBuilder $query, string $identifier): string
+    {
+        return $query->getGrammar()->wrap($identifier);
+    }
+
     private function alias(string $value): string
     {
-        return 'sf_analytics_'.preg_replace('/[^A-Za-z0-9_]+/', '_', $value);
+        $safe = trim(preg_replace('/[^A-Za-z0-9_]+/', '_', $value) ?: 'value', '_');
+        $safe = $safe !== '' ? substr($safe, 0, 42) : 'value';
+
+        return 'sf_analytics_'.$safe.'_'.substr(sha1($value), 0, 8);
     }
 }

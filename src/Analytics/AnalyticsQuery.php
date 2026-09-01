@@ -29,6 +29,13 @@ final class AnalyticsQuery
     private array $filters = [];
 
     /**
+     * @var array<int, AnalyticsAggregateFilter>
+     */
+    private array $aggregateFilters = [];
+
+    private ?AnalyticsRanking $ranking = null;
+
+    /**
      * @var array<int, AnalyticsOrder>
      */
     private array $order = [];
@@ -88,6 +95,16 @@ final class AnalyticsQuery
             }
         }
 
+        /** @var mixed $aggregateFilters */
+        $aggregateFilters = $payload['aggregate_filters'] ?? [];
+        if (is_array($aggregateFilters)) {
+            foreach ($aggregateFilters as $filter) {
+                if (is_array($filter)) {
+                    $query->aggregateFilter(AnalyticsAggregateFilter::fromArray($filter));
+                }
+            }
+        }
+
         /** @var mixed $order */
         $order = $payload['order'] ?? [];
         if (is_array($order)) {
@@ -96,6 +113,12 @@ final class AnalyticsQuery
                     $query->order(AnalyticsOrder::fromArray($orderItem));
                 }
             }
+        }
+
+        /** @var mixed $ranking */
+        $ranking = $payload['ranking'] ?? null;
+        if (is_array($ranking)) {
+            $query->ranking(AnalyticsRanking::fromArray($ranking));
         }
 
         if (isset($payload['limit']) && is_numeric($payload['limit'])) {
@@ -135,8 +158,11 @@ final class AnalyticsQuery
     public function dimension(string $dimension): self
     {
         self::assertKey($dimension, 'dimension key');
+        if (in_array($dimension, $this->dimensions, true)) {
+            throw new InvalidArgumentException(sprintf('Analytics query dimension [%s] is duplicated.', $dimension));
+        }
+
         $this->dimensions[] = $dimension;
-        $this->dimensions = array_values(array_unique($this->dimensions));
 
         return $this;
     }
@@ -203,6 +229,54 @@ final class AnalyticsQuery
         return $this;
     }
 
+    public function aggregateFilter(AnalyticsAggregateFilter $filter): self
+    {
+        $this->aggregateFilters[] = $filter;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, AnalyticsAggregateFilter>  $filters
+     */
+    public function aggregateFilters(array $filters): self
+    {
+        $this->aggregateFilters = [];
+
+        foreach ($filters as $filter) {
+            if (! $filter instanceof AnalyticsAggregateFilter) {
+                throw new InvalidArgumentException('Analytics query aggregate filters must contain only AnalyticsAggregateFilter instances.');
+            }
+
+            $this->aggregateFilter($filter);
+        }
+
+        return $this;
+    }
+
+    public function ranking(AnalyticsRanking $ranking): self
+    {
+        $this->ranking = $ranking;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $partitionBy
+     */
+    public function top(string $measure, int $limit, array $partitionBy = []): self
+    {
+        return $this->ranking(AnalyticsRanking::top($measure, $limit, $partitionBy));
+    }
+
+    /**
+     * @param  array<int, string>  $partitionBy
+     */
+    public function bottom(string $measure, int $limit, array $partitionBy = []): self
+    {
+        return $this->ranking(AnalyticsRanking::bottom($measure, $limit, $partitionBy));
+    }
+
     public function order(AnalyticsOrder $order): self
     {
         $this->order[] = $order;
@@ -264,6 +338,19 @@ final class AnalyticsQuery
     }
 
     /**
+     * @return array<int, AnalyticsAggregateFilter>
+     */
+    public function aggregateFiltersDefinition(): array
+    {
+        return $this->aggregateFilters;
+    }
+
+    public function rankingDefinition(): ?AnalyticsRanking
+    {
+        return $this->ranking;
+    }
+
+    /**
      * @return array<int, AnalyticsOrder>
      */
     public function orderDefinition(): array
@@ -287,6 +374,8 @@ final class AnalyticsQuery
             'dimensions' => $this->dimensions,
             'time' => $this->time,
             'filters' => array_map(static fn (AnalyticsFilter $filter): array => $filter->toArray(), $this->filters),
+            'aggregate_filters' => array_map(static fn (AnalyticsAggregateFilter $filter): array => $filter->toArray(), $this->aggregateFilters),
+            'ranking' => $this->ranking?->toArray(),
             'order' => array_map(static fn (AnalyticsOrder $order): array => $order->toArray(), $this->order),
             'limit' => $this->limit,
         ];

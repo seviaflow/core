@@ -47,6 +47,12 @@ return [
     'analytics' => [
         'default_limit' => 20,
         'max_limit' => 500,
+        'max_dimensions' => 4,
+        'max_relationship_depth' => 3,
+        'max_ranking_limit' => 25,
+        'max_complexity' => 10,
+        'complexity_limit_threshold' => 20,
+        'limit_complexity_divisor' => 100,
     ],
     'workflows' => [
         'enabled' => true,

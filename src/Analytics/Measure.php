@@ -14,17 +14,31 @@ final class Measure
     public const array AGGREGATIONS = ['count', 'sum', 'avg', 'min', 'max'];
 
     /**
+     * @var array<int, string>
+     */
+    public const array UNITS = ['number', 'integer', 'money', 'percent', 'duration', 'count'];
+
+    /**
      * @var callable|null
      */
     private $authorizationCallback = null;
 
     private ?string $label = null;
 
+    private ?string $description = null;
+
+    /**
+     * @var array<int, string>
+     */
+    private array $aliases = [];
+
     private string $aggregation = 'count';
 
     private AnalyticsExpression|string|null $expression = null;
 
     private string $type = 'number';
+
+    private ?string $unit = null;
 
     /**
      * @var array<string, mixed>
@@ -54,11 +68,56 @@ final class Measure
         return $this;
     }
 
+    public function description(?string $description): self
+    {
+        $this->description = $description !== null ? $this->normalizeNullableText($description) : null;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $aliases
+     */
+    public function aliases(array $aliases): self
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($aliases as $alias) {
+            if (! is_string($alias)) {
+                throw new InvalidArgumentException('Analytics measure aliases must contain only strings.');
+            }
+
+            $value = $this->normalizeNullableText($alias);
+            if ($value === null) {
+                throw new InvalidArgumentException('Analytics measure aliases cannot be empty.');
+            }
+
+            $fingerprint = $this->aliasFingerprint($value);
+            if (isset($seen[$fingerprint])) {
+                throw new InvalidArgumentException(sprintf('Analytics measure alias [%s] is duplicated.', $value));
+            }
+
+            $seen[$fingerprint] = true;
+            $normalized[] = $value;
+        }
+
+        $this->aliases = $normalized;
+
+        return $this;
+    }
+
+    public function alias(string $alias): self
+    {
+        return $this->aliases([...$this->aliases, $alias]);
+    }
+
     public function count(): self
     {
         $this->aggregation = 'count';
         $this->expression = null;
         $this->type = 'integer';
+        $this->unit = 'count';
 
         return $this;
     }
@@ -87,11 +146,30 @@ final class Measure
     {
         $normalized = strtolower(trim($type));
 
-        if (! in_array($normalized, ['integer', 'number', 'money'], true)) {
+        if (! in_array($normalized, self::UNITS, true)) {
             throw new InvalidArgumentException(sprintf('Analytics measure type [%s] is not supported.', $type));
         }
 
         $this->type = $normalized;
+        if ($this->unit === null) {
+            $this->unit = $normalized;
+        }
+
+        return $this;
+    }
+
+    public function unit(string $unit): self
+    {
+        $normalized = strtolower(trim($unit));
+
+        if (! in_array($normalized, self::UNITS, true)) {
+            throw new InvalidArgumentException(sprintf('Analytics measure unit [%s] is not supported.', $unit));
+        }
+
+        $this->unit = $normalized;
+        if ($normalized !== 'count') {
+            $this->type = $normalized;
+        }
 
         return $this;
     }
@@ -116,6 +194,7 @@ final class Measure
 
         $this->format['currency'] = $normalized;
         $this->type = 'money';
+        $this->unit = 'money';
 
         return $this;
     }
@@ -182,6 +261,19 @@ final class Measure
             : str((string) str_replace(['_', '-'], ' ', $this->key))->headline()->toString();
     }
 
+    public function getDescription(): ?string
+    {
+        return $this->description;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function aliasesDefinition(): array
+    {
+        return $this->aliases;
+    }
+
     public function aggregation(): string
     {
         return $this->aggregation;
@@ -195,6 +287,15 @@ final class Measure
     public function typeName(): string
     {
         return $this->type;
+    }
+
+    public function unitName(): string
+    {
+        if ($this->unit !== null) {
+            return $this->unit;
+        }
+
+        return $this->aggregation === 'count' ? 'count' : $this->type;
     }
 
     /**
@@ -221,11 +322,14 @@ final class Measure
         return [
             'key' => $this->key,
             'label' => $this->getLabel(),
+            'description' => $this->description,
+            'aliases' => $this->aliases,
             'aggregation' => $this->aggregation,
             'expression' => $this->expression instanceof AnalyticsExpression
                 ? $this->expression->toArray()
                 : $this->expression,
             'type' => $this->type,
+            'unit' => $this->unitName(),
             'format' => $this->format,
             'filters' => array_map(static fn (AnalyticsFilter $filter): array => $filter->toArray(), $this->filters),
         ];
@@ -246,8 +350,23 @@ final class Measure
         if ($this->type === 'integer') {
             $this->type = 'number';
         }
+        if ($this->unit === 'count') {
+            $this->unit = null;
+        }
 
         return $this;
+    }
+
+    private function normalizeNullableText(string $value): ?string
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', $value) ?: $value);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function aliasFingerprint(string $value): string
+    {
+        return mb_strtolower($value);
     }
 
     private static function assertKey(string $key, string $label): void

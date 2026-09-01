@@ -15,6 +15,7 @@ namespace App\SeviaFlow\Analytics;
 
 use App\SeviaFlow\Resources\OrderItemResource\OrderItemResource;
 use SeviaFlow\Core\Analytics\AnalyticsDataset;
+use SeviaFlow\Core\Analytics\AnalyticsAggregateFilter;
 use SeviaFlow\Core\Analytics\AnalyticsFilter;
 use SeviaFlow\Core\Analytics\Dimension;
 use SeviaFlow\Core\Analytics\Measure;
@@ -35,6 +36,8 @@ final class StoreAnalytics
                     ->count(),
                 Measure::make('line_revenue')
                     ->label('Line Revenue')
+                    ->description('Revenue from commercial order-item lines.')
+                    ->aliases(['product revenue', 'item sales'])
                     ->sum('line_total')
                     ->currency('USD')
                     ->filters([
@@ -44,7 +47,14 @@ final class StoreAnalytics
             ->dimensions([
                 Dimension::make('product')
                     ->label('Product')
+                    ->description('Product sold on the order item.')
+                    ->aliases(['sku product'])
                     ->relationship('product', 'name'),
+                Dimension::make('category')
+                    ->label('Category')
+                    ->description('Product category reached through the governed product relation.')
+                    ->aliases(['product category'])
+                    ->relationshipPath(['product', 'category'], 'id', 'name'),
                 Dimension::make('product_sku')
                     ->label('SKU')
                     ->relationshipField('product', 'sku'),
@@ -56,6 +66,12 @@ final class StoreAnalytics
                 TimeDimension::make('created_at')
                     ->label('Line Created At')
                     ->field('created_at'),
+                TimeDimension::make('order_ordered_at')
+                    ->label('Order Ordered At')
+                    ->description('Ordered-at timestamp from the related order.')
+                    ->aliases(['order date'])
+                    ->relationshipPath(['order'])
+                    ->field('ordered_at'),
             ]);
     }
 
@@ -99,11 +115,13 @@ Supported aggregations:
 - `min($columnOrExpression)`
 - `max($columnOrExpression)`
 
-Measures can define presentation metadata and authorization:
+Measures can define presentation metadata, aliases, units, and authorization:
 
 ```php
 Measure::make('revenue')
     ->label('Revenue')
+    ->description('Booked commercial order revenue.')
+    ->aliases(['sales', 'turnover'])
     ->sum('total')
     ->currency('USD')
     ->decimals(2)
@@ -130,6 +148,17 @@ Measure::make('outstanding')
 ```
 
 Measure filters must reference registered dimensions or time dimensions on the same dataset.
+
+Use `unit()` when a measure is numeric but not money:
+
+```php
+Measure::make('units')
+    ->label('Units')
+    ->description('Total units sold.')
+    ->aliases(['quantity', 'items sold'])
+    ->sum('quantity')
+    ->unit('integer');
+```
 
 ## Dimensions
 
@@ -162,7 +191,17 @@ Dimension::make('product_sku')
     ->relationshipField('product', 'sku');
 ```
 
-Current limitation: relationship dimensions support only one direct `BelongsTo` relation from the dataset resource model. Nested relations such as `product.category` are not supported by the compiler. If a query needs product category from `OrderItem`, expose a direct semantic field or relation first, then add a dimension such as `product_category`.
+Use `relationshipPath()` for governed multi-hop `BelongsTo` paths:
+
+```php
+Dimension::make('category')
+    ->label('Category')
+    ->description('Category of the product on the order item.')
+    ->aliases(['product category'])
+    ->relationshipPath(['product', 'category'], 'id', 'name');
+```
+
+Only paths declared in the catalog can be used. Consumers still reference the semantic key, for example `category`; they never send `product.category`, raw column names, or SQL.
 
 ## Time Dimensions
 
@@ -171,13 +210,24 @@ A time dimension is a date or datetime field used for time grouping and range fi
 ```php
 TimeDimension::make('ordered_at')
     ->label('Ordered At')
+    ->description('Date and time when the order was placed.')
+    ->aliases(['order date'])
     ->field('ordered_at')
     ->grains(['day', 'week', 'month']);
 ```
 
 Supported grains are `day`, `week`, `month`, `quarter`, and `year`. If `grains()` is omitted, all grains are allowed.
 
-Time ranges are inclusive: `from` maps to `>=` and `to` maps to `<=`.
+Use `relationshipPath()` on time dimensions when the timestamp lives on a related model:
+
+```php
+TimeDimension::make('order_ordered_at')
+    ->label('Order Ordered At')
+    ->relationshipPath(['order'])
+    ->field('ordered_at');
+```
+
+Time ranges are half-open: `from` maps to `>=` and `to` maps to `<`. Use `2026-06-01` as the exclusive end for "through May 2026".
 
 ## Execute Queries
 
@@ -188,11 +238,14 @@ use SeviaFlow\Core\Analytics\AnalyticsExecutor;
 use SeviaFlow\Core\Analytics\AnalyticsQuery;
 
 $query = AnalyticsQuery::make(StoreAnalytics::ORDER_ITEMS)
-    ->measure('line_revenue')
-    ->dimension('product')
-    ->time('created_at', 'month', '2026-03-01', '2026-05-31')
-    ->orderBy('line_revenue', 'desc')
-    ->limit(10);
+    ->measure('units')
+    ->dimensions(['category', 'product'])
+    ->filter(AnalyticsFilter::gte('order_ordered_at', '2026-01-01'))
+    ->filter(AnalyticsFilter::lt('order_ordered_at', '2026-06-01'))
+    ->top('units', 3, ['category'])
+    ->orderBy('category')
+    ->orderBy('units', 'desc')
+    ->limit(200);
 
 $result = app(AnalyticsExecutor::class)->execute($query, auth()->user());
 ```
@@ -207,16 +260,39 @@ $result->toArray();
 
 The executor validates every dataset, measure, dimension, time dimension, filter, and order key before compiling the query.
 
-Current query limitations:
+Supported query features:
 
 - A query must select at least one measure.
-- A query supports at most one regular dimension.
-- Time grouping can be combined with a measure and optional regular dimension.
+- A query can select multiple categorical dimensions up to `seviaflow.analytics.max_dimensions`.
+- Time grouping can be combined with multiple dimensions.
+- Relationship dimensions and related time dimensions support governed `BelongsTo` paths up to `seviaflow.analytics.max_relationship_depth`.
 - Filters can reference only registered dimensions or time dimensions.
+- Aggregate filters use selected measure keys and compile to HAVING-style filters.
+- Ranking supports Top-N and Bottom-N globally or per selected dimension/time partition.
 - Ordering can reference only selected measures, selected dimensions, or the selected time dimension.
 - Grouped queries are bounded by `seviaflow.analytics.default_limit` and `seviaflow.analytics.max_limit`.
 
-For use cases such as "top 3 products in each category", the catalog must expose category semantics and the execution layer must support either multiple dimensions, ranking per group, or multiple category-scoped queries.
+Example HAVING-style aggregate filter:
+
+```php
+AnalyticsQuery::make('store.orders')
+    ->measure('revenue')
+    ->dimension('customer')
+    ->aggregateFilter(AnalyticsAggregateFilter::gt('revenue', 5000))
+    ->orderBy('revenue', 'desc');
+```
+
+Example monthly Top-N per category:
+
+```php
+AnalyticsQuery::make(StoreAnalytics::ORDER_ITEMS)
+    ->measure('units')
+    ->dimensions(['category', 'product'])
+    ->time('order_ordered_at', 'month', '2026-01-01', '2026-06-01')
+    ->top('units', 3, ['category', 'order_ordered_at']);
+```
+
+The centralized complexity budget scores dimensions, related joins, time grouping, aggregate filters, ranking, and large limits. If the score exceeds `seviaflow.analytics.max_complexity`, the executor rejects the query with `AnalyticsQueryTooComplexException`; Copilot receives a `query_too_complex` tool result and must simplify, split, or clarify.
 
 ## Copilot Visibility
 

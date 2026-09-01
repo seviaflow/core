@@ -85,6 +85,8 @@ final class AnalyticsDataset
             $this->measures[$measure->key()] = $measure;
         }
 
+        $this->assertUniqueAliases($this->measures, 'measure');
+
         return $this;
     }
 
@@ -103,6 +105,8 @@ final class AnalyticsDataset
             $this->dimensions[$dimension->key()] = $dimension;
         }
 
+        $this->assertUniqueAliases($this->dimensions, 'dimension');
+
         return $this;
     }
 
@@ -120,6 +124,8 @@ final class AnalyticsDataset
 
             $this->timeDimensions[$dimension->key()] = $dimension;
         }
+
+        $this->assertUniqueAliases($this->timeDimensions, 'time dimension');
 
         return $this;
     }
@@ -232,13 +238,16 @@ final class AnalyticsDataset
     /**
      * @return array<string, mixed>
      */
-    public function toArray(): array
+    public function toArray(?Authenticatable $user = null): array
     {
         return [
             'key' => $this->key,
             'label' => $this->getLabel(),
             'resource' => $this->resourceClass(),
-            'measures' => array_map(static fn (Measure $measure): array => $measure->toArray(), $this->measures),
+            'measures' => array_map(
+                static fn (Measure $measure): array => $measure->toArray(),
+                array_filter($this->measures, static fn (Measure $measure): bool => $measure->canAccess($user))
+            ),
             'dimensions' => array_map(static fn (Dimension $dimension): array => $dimension->toArray(), $this->dimensions),
             'time_dimensions' => array_map(static fn (TimeDimension $dimension): array => $dimension->toArray(), $this->timeDimensions),
         ];
@@ -248,6 +257,32 @@ final class AnalyticsDataset
     {
         if (! preg_match('/^[A-Za-z][A-Za-z0-9_.-]*$/', $key)) {
             throw new InvalidArgumentException(sprintf('Analytics %s [%s] is invalid.', $label, $key));
+        }
+    }
+
+    /**
+     * @param  array<string, Measure|Dimension|TimeDimension>  $items
+     */
+    private function assertUniqueAliases(array $items, string $type): void
+    {
+        $seen = [];
+
+        foreach ($items as $key => $item) {
+            foreach ($item->aliasesDefinition() as $alias) {
+                $fingerprint = mb_strtolower($alias);
+
+                if (isset($seen[$fingerprint])) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Analytics %s alias [%s] is duplicated by [%s] and [%s].',
+                        $type,
+                        $alias,
+                        $seen[$fingerprint],
+                        $key
+                    ));
+                }
+
+                $seen[$fingerprint] = $key;
+            }
         }
     }
 }

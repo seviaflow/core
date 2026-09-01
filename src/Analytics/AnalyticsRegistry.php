@@ -80,7 +80,7 @@ final class AnalyticsRegistry
     {
         return [
             'datasets' => array_map(
-                static fn (AnalyticsDataset $dataset): array => $dataset->toArray(),
+                static fn (AnalyticsDataset $dataset): array => $dataset->toArray($user),
                 $this->visibleFor($user)
             ),
         ];

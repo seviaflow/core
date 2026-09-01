@@ -15,7 +15,19 @@ final class TimeDimension
 
     private ?string $label = null;
 
+    private ?string $description = null;
+
+    /**
+     * @var array<int, string>
+     */
+    private array $aliases = [];
+
     private ?string $field = null;
+
+    /**
+     * @var array<int, string>
+     */
+    private array $relationshipPath = [];
 
     /**
      * @var array<int, string>
@@ -40,11 +52,65 @@ final class TimeDimension
         return $this;
     }
 
+    public function description(?string $description): self
+    {
+        $this->description = $description !== null ? $this->normalizeNullableText($description) : null;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $aliases
+     */
+    public function aliases(array $aliases): self
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($aliases as $alias) {
+            if (! is_string($alias)) {
+                throw new InvalidArgumentException('Analytics time dimension aliases must contain only strings.');
+            }
+
+            $value = $this->normalizeNullableText($alias);
+            if ($value === null) {
+                throw new InvalidArgumentException('Analytics time dimension aliases cannot be empty.');
+            }
+
+            $fingerprint = $this->aliasFingerprint($value);
+            if (isset($seen[$fingerprint])) {
+                throw new InvalidArgumentException(sprintf('Analytics time dimension alias [%s] is duplicated.', $value));
+            }
+
+            $seen[$fingerprint] = true;
+            $normalized[] = $value;
+        }
+
+        $this->aliases = $normalized;
+
+        return $this;
+    }
+
+    public function alias(string $alias): self
+    {
+        return $this->aliases([...$this->aliases, $alias]);
+    }
+
     public function field(string $field): self
     {
         self::assertColumn($field, 'time dimension field');
 
         $this->field = $field;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $relationships
+     */
+    public function relationshipPath(array $relationships): self
+    {
+        $this->relationshipPath = $this->normalizeRelationshipPath($relationships);
 
         return $this;
     }
@@ -90,6 +156,19 @@ final class TimeDimension
             : str((string) str_replace(['_', '-'], ' ', $this->key))->headline()->toString();
     }
 
+    public function getDescription(): ?string
+    {
+        return $this->description;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function aliasesDefinition(): array
+    {
+        return $this->aliases;
+    }
+
     public function fieldName(): string
     {
         if (! is_string($this->field) || $this->field === '') {
@@ -113,6 +192,19 @@ final class TimeDimension
     }
 
     /**
+     * @return array<int, string>
+     */
+    public function relationshipPathDefinition(): array
+    {
+        return $this->relationshipPath;
+    }
+
+    public function relationshipDepth(): int
+    {
+        return count($this->relationshipPath);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(): array
@@ -120,7 +212,10 @@ final class TimeDimension
         return [
             'key' => $this->key,
             'label' => $this->getLabel(),
+            'description' => $this->description,
+            'aliases' => $this->aliases,
             'field' => $this->fieldName(),
+            'relationship_path' => $this->relationshipPath,
             'grains' => $this->grains,
         ];
     }
@@ -137,5 +232,47 @@ final class TimeDimension
         if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $column)) {
             throw new InvalidArgumentException(sprintf('Analytics %s [%s] is invalid.', $label, $column));
         }
+    }
+
+    private static function assertRelationship(string $relationship): void
+    {
+        if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $relationship)) {
+            throw new InvalidArgumentException(sprintf('Analytics relationship [%s] is invalid.', $relationship));
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $relationships
+     * @return array<int, string>
+     */
+    private function normalizeRelationshipPath(array $relationships): array
+    {
+        if ($relationships === []) {
+            throw new InvalidArgumentException('Analytics relationship path cannot be empty.');
+        }
+
+        $path = [];
+        foreach ($relationships as $relationship) {
+            if (! is_string($relationship)) {
+                throw new InvalidArgumentException('Analytics relationship path must contain only strings.');
+            }
+
+            self::assertRelationship($relationship);
+            $path[] = $relationship;
+        }
+
+        return array_values($path);
+    }
+
+    private function normalizeNullableText(string $value): ?string
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', $value) ?: $value);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function aliasFingerprint(string $value): string
+    {
+        return mb_strtolower($value);
     }
 }

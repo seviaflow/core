@@ -8,12 +8,14 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\Auth;
 use InvalidArgumentException;
 use SeviaFlow\Core\Analytics\Exceptions\AnalyticsAuthorizationException;
+use SeviaFlow\Core\Analytics\Exceptions\AnalyticsQueryTooComplexException;
 
 final class AnalyticsExecutor
 {
     public function __construct(
         private readonly AnalyticsRegistry $registry,
         private readonly AnalyticsCompiler $compiler = new AnalyticsCompiler,
+        private readonly AnalyticsComplexity $complexity = new AnalyticsComplexity,
     ) {}
 
     public function execute(AnalyticsQuery $query, ?Authenticatable $user = null): AnalyticsResult
@@ -27,8 +29,12 @@ final class AnalyticsExecutor
             dimensionKeys: $plan['dimensions'],
             time: $plan['time'],
             filters: $plan['filters'],
+            aggregateFilters: $plan['aggregate_filters'],
+            ranking: $plan['ranking'],
             order: $plan['order'],
             limit: $plan['limit'],
+            complexity: $plan['complexity'],
+            user: $user,
         ));
     }
 
@@ -60,8 +66,11 @@ final class AnalyticsExecutor
             'dimensions' => $plan['dimensions'],
             'time' => $plan['time'],
             'filters' => array_map(static fn (AnalyticsFilter $filter): array => $filter->toArray(), $plan['filters']),
+            'aggregate_filters' => array_map(static fn (AnalyticsAggregateFilter $filter): array => $filter->toArray(), $plan['aggregate_filters']),
+            'ranking' => $plan['ranking'] instanceof AnalyticsRanking ? $plan['ranking']->toArray() : null,
             'order' => array_map(static fn (AnalyticsOrder $order): array => $order->toArray(), $plan['order']),
             'limit' => $plan['limit'],
+            'complexity' => $plan['complexity'],
         ];
     }
 
@@ -72,8 +81,11 @@ final class AnalyticsExecutor
      *   dimensions:array<int, string>,
      *   time:array{dimension:string, grain:string, from:string|null, to:string|null}|null,
      *   filters:array<int, AnalyticsFilter>,
+     *   aggregate_filters:array<int, AnalyticsAggregateFilter>,
+     *   ranking:AnalyticsRanking|null,
      *   order:array<int, AnalyticsOrder>,
-     *   limit:int
+     *   limit:int,
+     *   complexity:array{score:int, max:int, breakdown:array<string, int>}
      * }
      */
     private function plan(AnalyticsQuery $query, ?Authenticatable $user): array
@@ -101,12 +113,13 @@ final class AnalyticsExecutor
         }
 
         $dimensions = $query->dimensionsDefinition();
-        if (count($dimensions) > 1) {
-            throw new InvalidArgumentException('Analytics query supports at most one dimension in this release.');
+        $maxDimensions = max(0, (int) config('seviaflow.analytics.max_dimensions', 4));
+        if (count($dimensions) > $maxDimensions) {
+            throw new InvalidArgumentException(sprintf('Analytics query supports at most %d dimensions.', $maxDimensions));
         }
 
         foreach ($dimensions as $dimensionKey) {
-            $dataset->dimension($dimensionKey);
+            $this->assertRelationshipDepth($dataset->dimension($dimensionKey), 'dimension');
         }
 
         $time = $query->timeDefinition();
@@ -115,10 +128,53 @@ final class AnalyticsExecutor
             if (! $timeDimension->supportsGrain($time['grain'])) {
                 throw new InvalidArgumentException(sprintf('Analytics time dimension [%s] does not support grain [%s].', $time['dimension'], $time['grain']));
             }
+
+            $this->assertRelationshipDepth($timeDimension, 'time dimension');
         }
 
         foreach ($query->filtersDefinition() as $filter) {
             $this->assertFilterFieldIsRegistered($dataset, $filter);
+            $this->assertFilterRelationshipDepth($dataset, $filter);
+        }
+
+        $aggregateFilters = $query->aggregateFiltersDefinition();
+        foreach ($aggregateFilters as $filter) {
+            $measureKey = $filter->measure();
+            if (! in_array($measureKey, $measures, true)) {
+                throw new InvalidArgumentException(sprintf('Analytics aggregate filter measure [%s] must be selected before filtering.', $measureKey));
+            }
+
+            $measure = $dataset->measure($measureKey);
+            if (! $measure->canAccess($user)) {
+                throw new AnalyticsAuthorizationException(sprintf('Analytics measure [%s] is not authorized for the current user.', $measureKey));
+            }
+        }
+
+        $ranking = $query->rankingDefinition();
+        if ($ranking instanceof AnalyticsRanking) {
+            $rankingMeasure = $ranking->measure();
+            if (! in_array($rankingMeasure, $measures, true)) {
+                throw new InvalidArgumentException(sprintf('Analytics ranking measure [%s] must be selected before ranking.', $rankingMeasure));
+            }
+
+            $maxRankingLimit = max(1, (int) config('seviaflow.analytics.max_ranking_limit', 25));
+            if ($ranking->limit() > $maxRankingLimit) {
+                throw new InvalidArgumentException(sprintf('Analytics ranking limit [%d] exceeds the configured max [%d].', $ranking->limit(), $maxRankingLimit));
+            }
+
+            foreach ($ranking->partitionBy() as $partition) {
+                if (AnalyticsRanking::isTimeToken($partition)) {
+                    if ($time === null) {
+                        throw new InvalidArgumentException('Analytics ranking partition $time requires a selected time dimension.');
+                    }
+
+                    continue;
+                }
+
+                if (! in_array($partition, $dimensions, true) && ($time === null || $partition !== $time['dimension'])) {
+                    throw new InvalidArgumentException(sprintf('Analytics ranking partition [%s] must be a selected dimension or selected time dimension.', $partition));
+                }
+            }
         }
 
         foreach ($query->orderDefinition() as $order) {
@@ -131,6 +187,21 @@ final class AnalyticsExecutor
         }
 
         $grouped = $dimensions !== [] || $time !== null;
+        $limit = $this->normalizeLimit($query->limitValue(), $grouped);
+        $complexity = $this->complexity->score(
+            dataset: $dataset,
+            measureKeys: $measures,
+            dimensionKeys: $dimensions,
+            time: $time,
+            filters: $query->filtersDefinition(),
+            aggregateFilters: $aggregateFilters,
+            ranking: $ranking,
+            limit: $limit,
+        );
+
+        if ($complexity['score'] > $complexity['max']) {
+            throw new AnalyticsQueryTooComplexException($complexity['score'], $complexity['max'], $complexity['breakdown']);
+        }
 
         return [
             'dataset' => $dataset,
@@ -138,8 +209,11 @@ final class AnalyticsExecutor
             'dimensions' => $dimensions,
             'time' => $time,
             'filters' => $query->filtersDefinition(),
+            'aggregate_filters' => $aggregateFilters,
+            'ranking' => $ranking,
             'order' => $query->orderDefinition(),
-            'limit' => $this->normalizeLimit($query->limitValue(), $grouped),
+            'limit' => $limit,
+            'complexity' => $complexity,
         ];
     }
 
@@ -150,6 +224,34 @@ final class AnalyticsExecutor
                 'Analytics filter field [%s] is not registered on dataset [%s].',
                 $filter->field(),
                 $dataset->key()
+            ));
+        }
+    }
+
+    private function assertFilterRelationshipDepth(AnalyticsDataset $dataset, AnalyticsFilter $filter): void
+    {
+        if ($dataset->hasDimension($filter->field())) {
+            $this->assertRelationshipDepth($dataset->dimension($filter->field()), 'filter dimension');
+
+            return;
+        }
+
+        if ($dataset->hasTimeDimension($filter->field())) {
+            $this->assertRelationshipDepth($dataset->timeDimension($filter->field()), 'filter time dimension');
+        }
+    }
+
+    private function assertRelationshipDepth(Dimension|TimeDimension $dimension, string $type): void
+    {
+        $maxDepth = max(0, (int) config('seviaflow.analytics.max_relationship_depth', 3));
+
+        if ($dimension->relationshipDepth() > $maxDepth) {
+            throw new InvalidArgumentException(sprintf(
+                'Analytics %s [%s] relationship depth [%d] exceeds the configured max [%d].',
+                $type,
+                $dimension->key(),
+                $dimension->relationshipDepth(),
+                $maxDepth
             ));
         }
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Analytics;
 
+use InvalidArgumentException;
+
 final class AnalyticsResult
 {
     /**
@@ -16,6 +18,23 @@ final class AnalyticsResult
         private readonly array $rows,
         private readonly array $metadata = [],
     ) {}
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public static function fromArray(array $payload): self
+    {
+        $dataset = $payload['dataset'] ?? null;
+        $query = $payload['query'] ?? null;
+        $rows = $payload['rows'] ?? null;
+        $metadata = $payload['metadata'] ?? [];
+
+        if (! is_string($dataset) || ! is_array($query) || ! is_array($rows) || ! is_array($metadata)) {
+            throw new InvalidArgumentException('Analytics result arrays require dataset, query, rows and metadata values.');
+        }
+
+        return new self($dataset, $query, array_values($rows), $metadata);
+    }
 
     public function dataset(): string
     {

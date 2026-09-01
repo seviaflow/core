@@ -10,10 +10,17 @@ final class Dimension
 {
     private ?string $label = null;
 
+    private ?string $description = null;
+
+    /**
+     * @var array<int, string>
+     */
+    private array $aliases = [];
+
     private ?string $field = null;
 
     /**
-     * @var array{relationship:string, title_attribute:string, mode:string}|null
+     * @var array{path:array<int, string>, key_attribute:string|null, label_attribute:string, mode:string, relationship?:string, title_attribute?:string}|null
      */
     private ?array $relationship = null;
 
@@ -42,6 +49,50 @@ final class Dimension
         return $this;
     }
 
+    public function description(?string $description): self
+    {
+        $this->description = $description !== null ? $this->normalizeNullableText($description) : null;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $aliases
+     */
+    public function aliases(array $aliases): self
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($aliases as $alias) {
+            if (! is_string($alias)) {
+                throw new InvalidArgumentException('Analytics dimension aliases must contain only strings.');
+            }
+
+            $value = $this->normalizeNullableText($alias);
+            if ($value === null) {
+                throw new InvalidArgumentException('Analytics dimension aliases cannot be empty.');
+            }
+
+            $fingerprint = $this->aliasFingerprint($value);
+            if (isset($seen[$fingerprint])) {
+                throw new InvalidArgumentException(sprintf('Analytics dimension alias [%s] is duplicated.', $value));
+            }
+
+            $seen[$fingerprint] = true;
+            $normalized[] = $value;
+        }
+
+        $this->aliases = $normalized;
+
+        return $this;
+    }
+
+    public function alias(string $alias): self
+    {
+        return $this->aliases([...$this->aliases, $alias]);
+    }
+
     public function field(string $field): self
     {
         self::assertColumn($field, 'dimension field');
@@ -58,6 +109,9 @@ final class Dimension
         self::assertColumn($titleAttribute, 'relationship title attribute');
 
         $this->relationship = [
+            'path' => [$relationship],
+            'key_attribute' => null,
+            'label_attribute' => $titleAttribute,
             'relationship' => $relationship,
             'title_attribute' => $titleAttribute,
             'mode' => 'entity',
@@ -73,11 +127,63 @@ final class Dimension
         self::assertColumn($field, 'relationship field');
 
         $this->relationship = [
+            'path' => [$relationship],
+            'key_attribute' => $field,
+            'label_attribute' => $field,
             'relationship' => $relationship,
             'title_attribute' => $field,
             'mode' => 'field',
         ];
         $this->field = null;
+
+        return $this;
+    }
+
+    /**
+     * @param  array<int, string>  $relationships
+     */
+    public function relationshipPath(array $relationships, string $keyAttribute = 'id', string $labelAttribute = 'id'): self
+    {
+        $path = $this->normalizeRelationshipPath($relationships);
+        self::assertColumn($keyAttribute, 'relationship key attribute');
+        self::assertColumn($labelAttribute, 'relationship label attribute');
+
+        $this->relationship = [
+            'path' => $path,
+            'key_attribute' => $keyAttribute,
+            'label_attribute' => $labelAttribute,
+            'relationship' => implode('.', $path),
+            'title_attribute' => $labelAttribute,
+            'mode' => 'entity',
+        ];
+        $this->field = null;
+
+        return $this;
+    }
+
+    public function relationshipKey(string $attribute): self
+    {
+        self::assertColumn($attribute, 'relationship key attribute');
+
+        if ($this->relationship === null) {
+            throw new InvalidArgumentException('Analytics relationship key requires relationship() or relationshipPath() first.');
+        }
+
+        $this->relationship['key_attribute'] = $attribute;
+
+        return $this;
+    }
+
+    public function relationshipLabel(string $attribute): self
+    {
+        self::assertColumn($attribute, 'relationship label attribute');
+
+        if ($this->relationship === null) {
+            throw new InvalidArgumentException('Analytics relationship label requires relationship() or relationshipPath() first.');
+        }
+
+        $this->relationship['label_attribute'] = $attribute;
+        $this->relationship['title_attribute'] = $attribute;
 
         return $this;
     }
@@ -127,17 +233,43 @@ final class Dimension
             : str((string) str_replace(['_', '-'], ' ', $this->key))->headline()->toString();
     }
 
+    public function getDescription(): ?string
+    {
+        return $this->description;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function aliasesDefinition(): array
+    {
+        return $this->aliases;
+    }
+
     public function fieldName(): ?string
     {
         return $this->field;
     }
 
     /**
-     * @return array{relationship:string, title_attribute:string, mode:string}|null
+     * @return array{path:array<int, string>, key_attribute:string|null, label_attribute:string, mode:string, relationship?:string, title_attribute?:string}|null
      */
     public function relationshipDefinition(): ?array
     {
         return $this->relationship;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function relationshipPathDefinition(): array
+    {
+        return $this->relationship['path'] ?? [];
+    }
+
+    public function relationshipDepth(): int
+    {
+        return count($this->relationshipPathDefinition());
     }
 
     public function typeName(): string
@@ -168,6 +300,8 @@ final class Dimension
         return [
             'key' => $this->key,
             'label' => $this->getLabel(),
+            'description' => $this->description,
+            'aliases' => $this->aliases,
             'type' => $this->type,
             'field' => $this->field,
             'relationship' => $this->relationship,
@@ -194,5 +328,40 @@ final class Dimension
         if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $relationship)) {
             throw new InvalidArgumentException(sprintf('Analytics relationship [%s] is invalid.', $relationship));
         }
+    }
+
+    /**
+     * @param  array<int, string>  $relationships
+     * @return array<int, string>
+     */
+    private function normalizeRelationshipPath(array $relationships): array
+    {
+        if ($relationships === []) {
+            throw new InvalidArgumentException('Analytics relationship path cannot be empty.');
+        }
+
+        $path = [];
+        foreach ($relationships as $relationship) {
+            if (! is_string($relationship)) {
+                throw new InvalidArgumentException('Analytics relationship path must contain only strings.');
+            }
+
+            self::assertRelationship($relationship);
+            $path[] = $relationship;
+        }
+
+        return array_values($path);
+    }
+
+    private function normalizeNullableText(string $value): ?string
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', $value) ?: $value);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function aliasFingerprint(string $value): string
+    {
+        return mb_strtolower($value);
     }
 }
