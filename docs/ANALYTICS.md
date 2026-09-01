@@ -256,6 +256,8 @@ The result is normalized for tables, charts, exports, and Copilot presentations:
 $result->toArray();
 ```
 
+Copilot presentation document v2 can render multiple blocks from the same current-turn `AnalyticsResult`, for example a server-grounded ranking table plus one faceted bar chart per category. The provider still supplies only semantic presentation intent; table rows, chart labels, and chart values are built from the normalized result on the server.
+
 ## Query Limits
 
 The executor validates every dataset, measure, dimension, time dimension, filter, and order key before compiling the query.
