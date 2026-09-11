@@ -145,7 +145,7 @@ final class AnalyticsCompiler
         /** @var Model $model */
         $model = new $modelClass;
 
-        return $resourceClass::query($model->newQuery());
+        return $resourceClass::query($model->newQuery())->withoutEagerLoads();
     }
 
     private function clearSelectedColumns(Builder $query): void

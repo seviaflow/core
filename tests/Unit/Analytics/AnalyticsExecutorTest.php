@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as AuthenticatableUser;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use SeviaFlow\Core\Analytics\AnalyticsAggregateFilter;
 use SeviaFlow\Core\Analytics\AnalyticsDataset;
@@ -244,6 +245,26 @@ it('executes scalar aggregation with measure-level semantics', function (): void
         ->and($result->firstMeasureValue('revenue'))->toBe(450.0)
         ->and($result->firstMeasureValue('average_order_value'))->toBe(150.0)
         ->and($result->toArray()['metadata']['grouped'])->toBeFalse();
+});
+
+it('does not eager load resource relations during analytics aggregation', function (): void {
+    $executor = new AnalyticsExecutor(new AnalyticsRegistry([
+        AnalyticsDataset::make('eager-orders')
+            ->resource(AnalyticsEagerLoadedOrderResource::class)
+            ->measures([
+                Measure::make('orders')->count(),
+            ]),
+    ]));
+
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+
+    $result = $executor->execute(AnalyticsQuery::make('eager-orders')->measure('orders'));
+
+    expect($result->firstMeasureValue('orders'))->toBe(4)
+        ->and(collect(DB::getQueryLog())->pluck('query')->filter(
+            static fn (string $query): bool => str_contains($query, 'analytics_customers')
+        ))->toBeEmpty();
 });
 
 it('executes computed measures safely', function (): void {
@@ -646,6 +667,16 @@ final class AnalyticsOrderResource extends Resource
         }
 
         return $query;
+    }
+}
+
+final class AnalyticsEagerLoadedOrderResource extends Resource
+{
+    protected static string $model = AnalyticsOrderRecord::class;
+
+    public static function query(Builder $query): Builder
+    {
+        return $query->with('customer');
     }
 }
 
