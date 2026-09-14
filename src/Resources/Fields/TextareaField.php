@@ -8,6 +8,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class TextareaField extends Field
 {
+    protected static string $type = 'textarea';
+
     private int $rows = 3;
 
     public function rows(int $rows): static

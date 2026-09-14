@@ -8,6 +8,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class SlugField extends Field
 {
+    protected static string $type = 'slug';
+
     private ?string $sourceField = null;
 
     public function from(string $field): static

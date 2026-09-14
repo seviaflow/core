@@ -8,6 +8,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class DateTimeField extends Field
 {
+    protected static string $type = 'datetime';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'format' => 'date-time', 'nullable' => true];
+    }
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

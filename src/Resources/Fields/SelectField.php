@@ -9,6 +9,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class SelectField extends Field
 {
+    protected static string $type = 'select';
+
     /**
      * @var array<array-key, string>
      */
@@ -30,6 +32,15 @@ final class SelectField extends Field
     public function getOptions(): array
     {
         return $this->options;
+    }
+
+    protected function defaultApiSchema(): array
+    {
+        return [
+            'type' => 'string',
+            'enum' => array_values(array_map(static fn (mixed $value): string => (string) $value, array_keys($this->options))),
+            'nullable' => true,
+        ];
     }
 
     public function defaultValidationRules(

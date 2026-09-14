@@ -13,6 +13,8 @@ use Throwable;
 
 class FileField extends Field
 {
+    protected static string $type = 'file';
+
     public const VISIBILITY_PUBLIC = 'public';
 
     public const VISIBILITY_PRIVATE = 'private';
@@ -152,5 +154,10 @@ class FileField extends Field
         }
 
         return $rules;
+    }
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'format' => 'uri', 'nullable' => true];
     }
 }

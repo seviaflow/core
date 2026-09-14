@@ -8,6 +8,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class PhoneField extends Field
 {
+    protected static string $type = 'phone';
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

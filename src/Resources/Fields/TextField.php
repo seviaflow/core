@@ -8,6 +8,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class TextField extends Field
 {
+    protected static string $type = 'text';
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

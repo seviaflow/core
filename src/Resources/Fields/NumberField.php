@@ -4,10 +4,38 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Resources\Fields;
 
+use Illuminate\Database\Eloquent\Model;
 use SeviaFlow\Core\Resources\ResourceContext;
 
 class NumberField extends Field
 {
+    protected static string $type = 'number';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'number', 'nullable' => true];
+    }
+
+    public function normalizeValue(mixed $value, ?Model $model = null): mixed
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return $value;
+        }
+
+        $normalized = trim((string) $value);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return strpbrk($normalized, '.eE') !== false
+            ? (float) $normalized
+            : (int) $normalized;
+    }
+
     private int|float|null $min = null;
 
     private int|float|null $max = null;

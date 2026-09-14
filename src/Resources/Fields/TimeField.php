@@ -8,6 +8,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class TimeField extends Field
 {
+    protected static string $type = 'time';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'format' => 'time', 'nullable' => true];
+    }
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

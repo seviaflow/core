@@ -8,6 +8,8 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class ImageField extends FileField
 {
+    protected static string $type = 'image';
+
     public static function make(string $name): static
     {
         $field = parent::make($name);

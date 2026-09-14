@@ -64,6 +64,16 @@ it('can set required on update fields with normalization', function (): void {
     expect($api->getRequiredOnUpdateFields())->toBe(['status', 'profile.name']);
 });
 
+it('stores explicit field schemas for headless resources', function (): void {
+    $api = (new ApiResource)->schema([
+        'uuid' => ['type' => 'string', 'format' => 'uuid'],
+        'invoice_number' => ['type' => 'string'],
+    ]);
+
+    expect($api->schemaFor('uuid'))->toBe(['type' => 'string', 'format' => 'uuid'])
+        ->and($api->getSchema())->toHaveKeys(['uuid', 'invoice_number']);
+});
+
 it('can enable deletable conditionally', function (): void {
     $api = new ApiResource;
 

@@ -8,6 +8,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class PasswordField extends Field
 {
+    protected static string $type = 'password';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'writeOnly' => true, 'nullable' => true];
+    }
+
     private bool $dehydrateOnlyWhenFilled = true;
 
     public function dehydrateOnlyWhenFilled(bool $enabled = true): static

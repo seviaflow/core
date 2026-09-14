@@ -8,6 +8,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class UrlField extends Field
 {
+    protected static string $type = 'url';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'format' => 'uri', 'nullable' => true];
+    }
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

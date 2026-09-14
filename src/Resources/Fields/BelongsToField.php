@@ -18,6 +18,8 @@ use SeviaFlow\Core\Resources\ResourceScopedQuery;
 
 final class BelongsToField extends Field
 {
+    protected static string $type = 'belongs-to';
+
     private const DEFAULT_OPTIONS_LIMIT = 50;
 
     private ?string $relationshipName = null;
@@ -317,6 +319,11 @@ final class BelongsToField extends Field
     public function isDependent(): bool
     {
         return $this->dependsOnField !== null && $this->dependsOnCallback !== null;
+    }
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'integer', 'nullable' => true];
     }
 
     public function defaultValidationRules(

@@ -8,6 +8,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 final class EmailField extends Field
 {
+    protected static string $type = 'email';
+
+    protected function defaultApiSchema(): array
+    {
+        return ['type' => 'string', 'format' => 'email', 'nullable' => true];
+    }
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,

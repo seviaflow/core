@@ -11,6 +11,11 @@ final class ApiResource
     private bool $enabled = false;
 
     /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $fieldSchemas = [];
+
+    /**
      * @var array<int, string>
      */
     private array $readableFields = [];
@@ -157,6 +162,67 @@ final class ApiResource
     public function getRequiredOnUpdateFields(): array
     {
         return $this->requiredOnUpdateFields;
+    }
+
+    /**
+     * Declare transport schemas for API fields that are not represented by a
+     * Core Form field, or override a field schema supplied by a Form.
+     *
+     * @param  array<string, array<string, mixed>>  $schemas
+     */
+    public function schema(array $schemas): static
+    {
+        foreach ($schemas as $field => $schema) {
+            if (! is_string($field) || trim($field) === '') {
+                throw new InvalidArgumentException('ApiResource::schema keys must be non-empty field names.');
+            }
+
+            $normalizedField = trim($field);
+            $this->normalizeFields([$normalizedField], 'schema');
+
+            if (! is_array($schema)) {
+                throw new InvalidArgumentException(sprintf(
+                    'ApiResource::schema for field [%s] must be an array.',
+                    $normalizedField
+                ));
+            }
+
+            $this->fieldSchemas[$normalizedField] = array_replace_recursive(
+                $this->fieldSchemas[$normalizedField] ?? [],
+                $schema
+            );
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function getSchema(): array
+    {
+        return $this->fieldSchemas;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function schemaFor(string $field): ?array
+    {
+        return $this->fieldSchemas[$field] ?? null;
+    }
+
+    public function allowsOperation(string $operation): bool
+    {
+        return match ($operation) {
+            'index', 'show', 'file' => $this->isReadable(),
+            'store' => $this->isCreatable(),
+            'update' => $this->isUpdatable(),
+            'destroy' => $this->allowsDelete(),
+            'flow' => $this->isReadable() && $this->allowsFlow(),
+            'execute-flow' => $this->allowsFlow(),
+            default => false,
+        };
     }
 
     public function deletable(bool $condition = true): static

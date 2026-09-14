@@ -14,6 +14,13 @@ use SeviaFlow\Core\Resources\ResourceContext;
 
 abstract class Field
 {
+    protected static string $type = 'text';
+
+    /**
+     * @var array<string, mixed>
+     */
+    private array $apiSchema = [];
+
     private ?string $label = null;
 
     private ?string $help = null;
@@ -52,6 +59,84 @@ abstract class Field
     public function name(): string
     {
         return $this->name;
+    }
+
+    public function type(): string
+    {
+        return static::$type;
+    }
+
+    public function getType(): string
+    {
+        return $this->type();
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     */
+    public function schema(array $schema): static
+    {
+        $this->apiSchema = array_replace_recursive($this->apiSchema, $schema);
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getSchema(): array
+    {
+        return array_replace_recursive($this->defaultApiSchema(), $this->apiSchema);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getApiSchema(): array
+    {
+        return $this->getSchema();
+    }
+
+    public function nullable(bool $condition = true): static
+    {
+        return $this->schema(['nullable' => $condition]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function defaultApiSchema(): array
+    {
+        return [
+            'type' => 'string',
+            'nullable' => true,
+        ];
+    }
+
+    public function normalizeValue(mixed $value, ?Model $model = null): mixed
+    {
+        return $this->normalizeStringValue($value);
+    }
+
+    public function prepareForValidation(mixed $value): mixed
+    {
+        return is_string($value) ? trim($value) : $value;
+    }
+
+    public function prepareForImport(mixed $value): mixed
+    {
+        return $this->prepareForValidation($value);
+    }
+
+    protected function normalizeStringValue(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $normalized = trim($value);
+
+        return $normalized === '' ? null : $normalized;
     }
 
     public function label(?string $label = null): static
