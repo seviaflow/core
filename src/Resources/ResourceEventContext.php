@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Resources;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
+use SeviaFlow\Core\Support\SensitiveDataPolicy;
 
 final class ResourceEventContext
 {
@@ -18,6 +20,10 @@ final class ResourceEventContext
     public const SOURCE_API = 'api';
 
     public const SOURCE_IMPORT = 'import';
+
+    public const SOURCE_INLINE_CREATE = 'inline_create';
+
+    public const SOURCE_RELATION = 'relation';
 
     public const SOURCE_ACTION = 'action';
 
@@ -43,11 +49,14 @@ final class ResourceEventContext
 
     public const OPERATION_RESTORED = 'restored';
 
-    /**
-     * @param  array<string, mixed>  $original
-     * @param  array<string, mixed>  $changes
-     * @param  array<string, mixed>  $metadata
-     */
+    private readonly array $original;
+
+    private readonly array $changes;
+
+    private readonly array $metadata;
+
+    private readonly string $correlationId;
+
     public function __construct(
         private readonly mixed $user,
         private readonly string $resourceClass,
@@ -55,15 +64,26 @@ final class ResourceEventContext
         private readonly string $operation,
         private readonly string $source,
         private readonly ?Request $request = null,
-        private readonly array $original = [],
-        private readonly array $changes = [],
-        private readonly array $metadata = []
+        array $original = [],
+        array $changes = [],
+        array $metadata = [],
+        private readonly ?string $connection = null,
+        ?string $correlationId = null,
     ) {
         $this->assertSupportedOperation($this->operation);
         $this->assertSupportedSource($this->source);
+        $this->original = SensitiveDataPolicy::redact($original);
+        $this->changes = SensitiveDataPolicy::redact($changes);
+        $this->metadata = SensitiveDataPolicy::redact($metadata);
+        $this->correlationId = trim((string) $correlationId) ?: (string) Str::uuid();
     }
 
     public function user(): mixed
+    {
+        return $this->user;
+    }
+
+    public function actor(): mixed
     {
         return $this->user;
     }
@@ -86,6 +106,16 @@ final class ResourceEventContext
     public function source(): string
     {
         return $this->source;
+    }
+
+    public function connection(): ?string
+    {
+        return $this->connection;
+    }
+
+    public function correlationId(): string
+    {
+        return $this->correlationId;
     }
 
     public function request(): ?Request
@@ -128,6 +158,8 @@ final class ResourceEventContext
             self::SOURCE_SHOW,
             self::SOURCE_API,
             self::SOURCE_IMPORT,
+            self::SOURCE_INLINE_CREATE,
+            self::SOURCE_RELATION,
             self::SOURCE_ACTION,
             self::SOURCE_BULK_ACTION,
             self::SOURCE_WORKFLOW,

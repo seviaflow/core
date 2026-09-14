@@ -5,20 +5,29 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Import;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use SeviaFlow\Core\Forms\FieldValidationBridge;
+use SeviaFlow\Core\Operations\ResourceOperationContext;
+use SeviaFlow\Core\Operations\ResourceOperationService;
+use SeviaFlow\Core\Resources\Fields\DateField;
+use SeviaFlow\Core\Resources\Fields\DateTimeField;
+use SeviaFlow\Core\Resources\Fields\Field;
+use SeviaFlow\Core\Resources\Fields\FileField;
+use SeviaFlow\Core\Resources\Fields\MultiSelectField;
+use SeviaFlow\Core\Resources\Fields\NumberField;
+use SeviaFlow\Core\Resources\Fields\TimeField;
+use SeviaFlow\Core\Resources\Fields\ToggleField;
 use SeviaFlow\Core\Resources\ImportResource;
 use SeviaFlow\Core\Resources\Resource;
 use SeviaFlow\Core\Resources\ResourceContext;
 use SeviaFlow\Core\Resources\ResourceEventContext;
-use SeviaFlow\Core\Resources\ResourceEventDispatcher;
 
 final class CsvImportExecutor
 {
     public function __construct(
         private readonly FieldValidationBridge $fieldValidationBridge = new FieldValidationBridge,
-        private readonly ResourceEventDispatcher $resourceEventDispatcher = new ResourceEventDispatcher
+        private readonly ResourceOperationService $operationService = new ResourceOperationService,
     ) {}
 
     /**
@@ -34,7 +43,9 @@ final class CsvImportExecutor
         string $resourceClass,
         ImportResource $import,
         string $path,
-        int $maxRows
+        int $maxRows,
+        mixed $user = null,
+        ?Request $request = null,
     ): array {
         $stream = fopen($path, 'rb');
         if ($stream === false) {
@@ -103,17 +114,22 @@ final class CsvImportExecutor
         $modelClass = $resourceClass::model();
         /** @var Model $model */
         $model = new $modelClass;
-        $casts = $model->getCasts();
-        $validationDefinition = $this->rulesFor(
-            resourceClass: $resourceClass,
-            import: $import,
-            requiredFields: $requiredFields,
-            allowedFields: $allowedFields,
-            casts: $casts
-        );
-        $rules = $validationDefinition['rules'];
-        $attributes = $validationDefinition['attributes'];
+        $fields = $this->operationService->fieldsForResource($resourceClass, $allowedFields);
+        $fileFields = array_values(array_filter(
+            $fields,
+            static fn (Field $field): bool => $field instanceof FileField
+                && in_array($field->name(), $normalizedHeaders, true)
+        ));
+        if ($fileFields !== []) {
+            return $this->failure([], [
+                sprintf(
+                    'File fields cannot be imported from CSV: %s.',
+                    implode(', ', array_map(static fn (Field $field): string => $field->name(), $fileFields))
+                ),
+            ]);
+        }
 
+        $casts = $model->getCasts();
         $rowErrors = [];
         $records = [];
 
@@ -128,7 +144,23 @@ final class CsvImportExecutor
                 $payload[$header] = is_scalar($value) ? trim((string) $value) : '';
             }
 
-            $validator = Validator::make($payload, $rules, [], $attributes);
+            $payload = $this->operationService->prepareForImport($fields, $payload);
+            $validationDefinition = $this->rulesFor(
+                resourceClass: $resourceClass,
+                import: $import,
+                requiredFields: $requiredFields,
+                allowedFields: $allowedFields,
+                casts: $casts,
+                fields: $fields,
+                fieldValues: $payload,
+            );
+
+            $validator = Validator::make(
+                $payload,
+                $validationDefinition['rules'],
+                [],
+                $validationDefinition['attributes']
+            );
             if ($validator->fails()) {
                 $rowErrors[] = sprintf(
                     'Row %d: %s',
@@ -148,50 +180,27 @@ final class CsvImportExecutor
             return $this->failure($rowErrors, []);
         }
 
-        DB::transaction(function () use ($modelClass, $records, $resourceClass): void {
+        $model->getConnection()->transaction(function () use ($modelClass, $records, $resourceClass, $allowedFields, $user, $request): void {
+            $resourceSlug = $this->resourceSlug($resourceClass);
+            $fields = $this->operationService->fieldsForResource($resourceClass, $allowedFields);
+
             foreach ($records as $index => $record) {
                 /** @var Model $created */
                 $created = new $modelClass;
-                foreach ($record as $field => $value) {
-                    $created->setAttribute($field, $value);
-                }
-
-                $resourceSlug = $this->resourceSlug($resourceClass);
-                $this->resourceEventDispatcher->dispatch(
+                $this->operationService->execute(
                     resourceClass: $resourceClass,
-                    event: ResourceEventContext::OPERATION_CREATING,
-                    record: $created,
-                    context: new ResourceEventContext(
-                        user: null,
-                        resourceClass: $resourceClass,
-                        resourceSlug: $resourceSlug,
-                        operation: ResourceEventContext::OPERATION_CREATING,
+                    resourceSlug: $resourceSlug,
+                    model: $created,
+                    fields: $fields,
+                    values: $record,
+                    context: ResourceContext::Create,
+                    operationContext: new ResourceOperationContext(
+                        actor: $user,
                         source: ResourceEventContext::SOURCE_IMPORT,
-                        request: null,
-                        original: [],
-                        changes: $record,
-                        metadata: ['row' => $index + 1]
-                    )
+                        request: $request,
+                        metadata: ['row' => $index + 1],
+                    ),
                 );
-
-                $created->save();
-                $this->resourceEventDispatcher->dispatch(
-                    resourceClass: $resourceClass,
-                    event: ResourceEventContext::OPERATION_CREATED,
-                    record: $created,
-                    context: new ResourceEventContext(
-                        user: null,
-                        resourceClass: $resourceClass,
-                        resourceSlug: $resourceSlug,
-                        operation: ResourceEventContext::OPERATION_CREATED,
-                        source: ResourceEventContext::SOURCE_IMPORT,
-                        request: null,
-                        original: [],
-                        changes: $record,
-                        metadata: ['row' => $index + 1]
-                    )
-                );
-                unset($created);
             }
         });
 
@@ -215,18 +224,27 @@ final class CsvImportExecutor
         ImportResource $import,
         array $requiredFields,
         array $allowedFields,
-        array $casts
+        array $casts,
+        array $fields,
+        array $fieldValues = [],
     ): array {
         $requiredLookup = array_fill_keys($requiredFields, true);
         $rules = [];
         $attributes = [];
         $bridgedFieldRules = [];
+        $fieldMap = [];
+
+        foreach ($fields as $field) {
+            $fieldMap[$field->name()] = $field;
+        }
 
         if ($import->usesFormFieldRules()) {
             $bridged = $this->fieldValidationBridge->build(
                 $resourceClass,
                 ResourceContext::Create,
-                $allowedFields
+                $allowedFields,
+                null,
+                $fieldValues,
             );
             $bridgedFieldRules = $bridged['rules'];
             $attributes = $bridged['attributes'];
@@ -235,16 +253,10 @@ final class CsvImportExecutor
         foreach ($allowedFields as $field) {
             $baseFieldRules = isset($requiredLookup[$field]) ? ['required'] : ['nullable'];
 
-            $cast = strtolower((string) ($casts[$field] ?? ''));
-            if (in_array($cast, ['int', 'integer', 'real', 'float', 'double', 'decimal'], true)) {
-                $baseFieldRules[] = 'numeric';
-            } elseif (in_array($cast, ['bool', 'boolean'], true)) {
-                $baseFieldRules[] = 'boolean';
-            } elseif (in_array($cast, ['date', 'datetime', 'immutable_date', 'immutable_datetime', 'timestamp'], true)) {
-                $baseFieldRules[] = 'date';
-            } else {
-                $baseFieldRules[] = 'string';
-            }
+            $baseFieldRules = array_merge($baseFieldRules, $this->typeRules(
+                $fieldMap[$field] ?? null,
+                strtolower((string) ($casts[$field] ?? '')),
+            ));
 
             $rules[$field] = $this->deduplicateRules(array_values(array_merge(
                 $baseFieldRules,
@@ -256,6 +268,39 @@ final class CsvImportExecutor
             'rules' => $rules,
             'attributes' => $attributes,
         ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function typeRules(?Field $field, string $cast): array
+    {
+        if ($field instanceof MultiSelectField) {
+            return ['array'];
+        }
+
+        if ($field instanceof ToggleField) {
+            return ['boolean'];
+        }
+
+        if ($field instanceof NumberField) {
+            return ['numeric'];
+        }
+
+        if ($field instanceof FileField) {
+            return ['file'];
+        }
+
+        if ($field instanceof DateField || $field instanceof DateTimeField || $field instanceof TimeField) {
+            return ['date'];
+        }
+
+        return match (true) {
+            in_array($cast, ['int', 'integer', 'real', 'float', 'double', 'decimal'], true) => ['numeric'],
+            in_array($cast, ['bool', 'boolean'], true) => ['boolean'],
+            in_array($cast, ['date', 'datetime', 'immutable_date', 'immutable_datetime', 'timestamp'], true) => ['date'],
+            default => ['string'],
+        };
     }
 
     /**

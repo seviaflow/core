@@ -18,13 +18,15 @@ final class FieldValidationBridge
     /**
      * @param  class-string<resource>  $resourceClass
      * @param  array<int, string>  $allowedFields
+     * @param  array<string, mixed>  $fieldValues
      * @return array{rules: array<string, array<int, mixed>>, attributes: array<string, string>}
      */
     public function build(
         string $resourceClass,
         ResourceContext $context,
         array $allowedFields,
-        ?Model $record = null
+        ?Model $record = null,
+        array $fieldValues = []
     ): array {
         $allowedLookup = array_fill_keys($allowedFields, true);
         $form = $resourceClass::form(new Form);
@@ -46,7 +48,7 @@ final class FieldValidationBridge
             $context,
             $resourceClass::model(),
             $bridgeRootKey,
-            [],
+            $fieldValues,
             $record
         );
         $prefixedAttributes = $this->formValidationRules->attributes($fields, $context, $bridgeRootKey);

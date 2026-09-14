@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Resources;
 
+use Illuminate\Database\Eloquent\Model;
 use LogicException;
 use SeviaFlow\Core\Events\Resources\ResourceCreated;
 use SeviaFlow\Core\Events\Resources\ResourceCreating;
@@ -33,6 +34,26 @@ final class ResourceEventDispatcher
         foreach ($handlers as $handler) {
             $this->executeHandler($handler, $record, $context, $event);
         }
+    }
+
+    /**
+     * @param  class-string<\SeviaFlow\Core\Resources\Resource>  $resourceClass
+     */
+    public function dispatchAfterCommit(
+        string $resourceClass,
+        string $event,
+        mixed $record,
+        ResourceEventContext $context
+    ): void {
+        if (! $record instanceof Model || $record->getConnection()->transactionLevel() === 0) {
+            $this->dispatch($resourceClass, $event, $record, $context);
+
+            return;
+        }
+
+        $record->getConnection()->afterCommit(function () use ($resourceClass, $event, $record, $context): void {
+            $this->dispatch($resourceClass, $event, $record, $context);
+        });
     }
 
     private function executeHandler(
