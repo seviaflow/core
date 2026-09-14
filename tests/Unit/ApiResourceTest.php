@@ -74,6 +74,30 @@ it('can enable deletable conditionally', function (): void {
     expect($api->isDeletable())->toBeTrue();
 });
 
+it('uses enabled state and field capabilities for api operations', function (): void {
+    $api = (new ApiResource)
+        ->enabled()
+        ->readable(['name'])
+        ->creatable(['name'])
+        ->updatable(['name'])
+        ->deletable()
+        ->flow();
+
+    expect($api->isReadable())->toBeTrue()
+        ->and($api->isCreatable())->toBeTrue()
+        ->and($api->isUpdatable())->toBeTrue()
+        ->and($api->allowsDelete())->toBeTrue()
+        ->and($api->allowsFlow())->toBeTrue();
+
+    $api->disabled();
+
+    expect($api->isReadable())->toBeFalse()
+        ->and($api->isCreatable())->toBeFalse()
+        ->and($api->isUpdatable())->toBeFalse()
+        ->and($api->allowsDelete())->toBeFalse()
+        ->and($api->allowsFlow())->toBeFalse();
+});
+
 it('can enable flow conditionally', function (): void {
     $api = new ApiResource;
 

@@ -17,6 +17,10 @@ final class BulkAction
 
     private bool $danger = false;
 
+    private bool $readOnly = false;
+
+    private bool $mutating = true;
+
     private bool $requiresConfirmation = false;
 
     private ?string $confirmButton = null;
@@ -99,6 +103,36 @@ final class BulkAction
     public function isDanger(): bool
     {
         return $this->danger;
+    }
+
+    public function readOnly(bool $condition = true): self
+    {
+        $this->readOnly = $condition;
+        if ($condition) {
+            $this->mutating = false;
+        }
+
+        return $this;
+    }
+
+    public function isReadOnly(): bool
+    {
+        return $this->readOnly;
+    }
+
+    public function mutating(bool $condition = true): self
+    {
+        $this->mutating = $condition;
+        if ($condition) {
+            $this->readOnly = false;
+        }
+
+        return $this;
+    }
+
+    public function isMutating(): bool
+    {
+        return $this->mutating;
     }
 
     public function requiresConfirmation(bool $condition = true): self

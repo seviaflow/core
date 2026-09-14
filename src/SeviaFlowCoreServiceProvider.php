@@ -8,6 +8,7 @@ use Illuminate\Support\ServiceProvider;
 use SeviaFlow\Core\Analytics\AnalyticsCompiler;
 use SeviaFlow\Core\Analytics\AnalyticsExecutor;
 use SeviaFlow\Core\Analytics\AnalyticsRegistry;
+use SeviaFlow\Core\Auth\AdminAccessGate;
 use SeviaFlow\Core\Auth\Permissions\PermissionChecker;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataCache;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataResolver;
@@ -39,6 +40,7 @@ final class SeviaFlowCoreServiceProvider extends ServiceProvider
             return new ResourceRegistry($resources);
         });
         $this->app->singleton(PermissionChecker::class, fn (): PermissionChecker => new PermissionChecker);
+        $this->app->singleton(AdminAccessGate::class, fn (): AdminAccessGate => new AdminAccessGate);
         $this->app->singleton(ResourceMetadataResolver::class, fn (): ResourceMetadataResolver => new ResourceMetadataResolver);
         $this->app->singleton(ResourceMetadataCache::class, function ($app): ResourceMetadataCache {
             return new ResourceMetadataCache(

@@ -132,6 +132,8 @@ final class ResourceMetadataResolver
             'name' => $action->name(),
             'label' => $action->getLabel(),
             'danger' => $action->isDanger(),
+            'read_only' => $action->isReadOnly(),
+            'mutating' => $action->isMutating(),
             'requires_confirmation' => $action->shouldRequireConfirmation(),
             'max_records' => $action->getMaxRecords(),
         ];

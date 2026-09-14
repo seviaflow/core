@@ -32,6 +32,7 @@ return [
     'permissions' => [
         'enabled' => false,
         'user_model' => null,
+        'admin_gate' => null,
         'role_management' => [
             'resource' => '__settings.roles',
             'ability' => 'update',

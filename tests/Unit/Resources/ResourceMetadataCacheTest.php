@@ -100,6 +100,15 @@ it('metadata snapshot does not store user-specific authorization decisions', fun
         ->and($snapshot['bulk_actions'][0])->not->toHaveKey('authorization');
 });
 
+it('metadata snapshot declares bulk operation mode', function (): void {
+    $snapshot = (new ResourceMetadataResolver)
+        ->resolve('metadata-users', MetadataUsersResource::class)
+        ->toArray();
+
+    expect($snapshot['bulk_actions'][0]['read_only'])->toBeFalse()
+        ->and($snapshot['bulk_actions'][0]['mutating'])->toBeTrue();
+});
+
 it('metadata snapshot never contains result rows or query payloads', function (): void {
     $snapshot = (new ResourceMetadataResolver)
         ->resolve('metadata-users', MetadataUsersResource::class)
@@ -198,6 +207,7 @@ final class MetadataUsersResource extends Resource
         return [
             BulkAction::make('archive')
                 ->label('Archive')
+                ->mutating()
                 ->danger()
                 ->authorize(fn (mixed $user): bool => $user !== null)
                 ->handle(fn ($records): mixed => $records),

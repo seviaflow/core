@@ -96,3 +96,13 @@ it('supports explicit authorization callback', function (): void {
     expect($allowed)->toBeTrue()
         ->and($denied)->toBeFalse();
 });
+
+it('declares read-only and mutating operation modes', function (): void {
+    $readOnly = BulkAction::make('preview')->readOnly();
+    $mutating = BulkAction::make('archive')->mutating();
+
+    expect($readOnly->isReadOnly())->toBeTrue()
+        ->and($readOnly->isMutating())->toBeFalse()
+        ->and($mutating->isReadOnly())->toBeFalse()
+        ->and($mutating->isMutating())->toBeTrue();
+});

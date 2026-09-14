@@ -8,6 +8,20 @@ Core owns the package-neutral SeviaFlow data/resource engine: resources, forms, 
 
 Core intentionally has no Livewire dependency and does not register UI or API routes.
 
+## Admin Access Hook
+
+Core does not infer panel access from the optional role system. Hosts must configure
+`seviaflow.permissions.admin_gate` with a callable accepting the current
+`Authenticatable` user and returning a boolean. A missing or failing hook denies
+panel access. The UI evaluates this hook on every request and Livewire update, so
+role revocation takes effect without relying on a stale mounted component.
+
+```php
+'permissions' => [
+    'admin_gate' => [App\Support\NorthstarAccess::class, 'canAccessPanel'],
+],
+```
+
 ## Installation Status
 
 SeviaFlow is pre-release. The `main` branch is aliased as `0.1.x-dev`; the first stable tag is expected to start at `0.1.0`.

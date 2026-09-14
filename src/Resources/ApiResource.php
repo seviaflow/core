@@ -64,6 +64,11 @@ final class ApiResource
         return $this->enabled;
     }
 
+    public function isReadable(): bool
+    {
+        return $this->enabled && $this->readableFields !== [];
+    }
+
     /**
      * @param  array<int, string>  $fields
      */
@@ -168,6 +173,21 @@ final class ApiResource
         return $this->deletable;
     }
 
+    public function isCreatable(): bool
+    {
+        return $this->enabled && $this->creatableFields !== [];
+    }
+
+    public function isUpdatable(): bool
+    {
+        return $this->enabled && $this->updatableFields !== [];
+    }
+
+    public function allowsDelete(): bool
+    {
+        return $this->enabled && $this->deletable;
+    }
+
     public function flow(bool $condition = true): static
     {
         if ($condition) {
@@ -180,6 +200,11 @@ final class ApiResource
     public function isFlowEnabled(): bool
     {
         return $this->flowEnabled;
+    }
+
+    public function allowsFlow(): bool
+    {
+        return $this->enabled && $this->flowEnabled;
     }
 
     public function useFormFieldRules(bool $condition = true): static
