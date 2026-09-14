@@ -41,6 +41,15 @@ it('rejects invalid registered resource class', function (): void {
     $registry->resolve('users');
 })->throws(InvalidResourceClassException::class);
 
+it('finds the registered resource for a model', function (): void {
+    $registry = new ResourceRegistry([
+        'users' => RegistryTestUserResource::class,
+    ]);
+
+    expect($registry->findByModel(ExampleUser::class))->toBe(RegistryTestUserResource::class)
+        ->and($registry->findByModel(stdClass::class))->toBeNull();
+});
+
 final class RegistryTestUserResource extends Resource
 {
     protected static string $model = ExampleUser::class;

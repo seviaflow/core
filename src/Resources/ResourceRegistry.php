@@ -52,4 +52,19 @@ final class ResourceRegistry
 
         return $resolved;
     }
+
+    /**
+     * @param  class-string  $modelClass
+     * @return class-string<\SeviaFlow\Core\Resources\Resource>|null
+     */
+    public function findByModel(string $modelClass): ?string
+    {
+        foreach ($this->all() as $resourceClass) {
+            if ($resourceClass::model() === $modelClass) {
+                return $resourceClass;
+            }
+        }
+
+        return null;
+    }
 }

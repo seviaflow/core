@@ -8,7 +8,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Relation;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
 use InvalidArgumentException;
@@ -16,6 +15,7 @@ use SeviaFlow\Core\Resources\Columns\BelongsToColumn;
 use SeviaFlow\Core\Resources\Columns\Column;
 use SeviaFlow\Core\Resources\Filters\Filter;
 use SeviaFlow\Core\Resources\ResourceContext;
+use SeviaFlow\Core\Resources\ResourceScopedQuery;
 use SeviaFlow\Core\Resources\Table;
 use SeviaFlow\Core\Tables\Queries\AppliesFilters;
 use SeviaFlow\Core\Tables\Queries\AppliesSearch;
@@ -138,13 +138,11 @@ final class ResourceTableQuery
 
     public function find(int|string $recordId): ?Model
     {
-        $query = $this->newModelQuery();
-
-        if ($this->usesSoftDeletes()) {
-            call_user_func([$query, 'withTrashed']);
-        }
-
-        return $query->find($recordId);
+        return ResourceScopedQuery::find(
+            $this->resourceClass,
+            $recordId,
+            ResourceScopedQuery::WITH_TRASHED
+        );
     }
 
     public function baseQuery(): Builder
@@ -242,31 +240,16 @@ final class ResourceTableQuery
 
         $query = $model->newQuery();
 
-        return $this->resourceClass::query($query);
+        return ResourceScopedQuery::make($this->resourceClass, $query);
     }
 
     private function applyTrashedScope(Builder $query): void
     {
-        if (! $this->usesSoftDeletes()) {
-            return;
-        }
-
-        if ($this->trashedScope === 'trashed') {
-            call_user_func([$query, 'onlyTrashed']);
-
-            return;
-        }
-
-        if ($this->trashedScope === 'with_trashed') {
-            call_user_func([$query, 'withTrashed']);
-        }
-    }
-
-    private function usesSoftDeletes(): bool
-    {
-        $modelClass = $this->resourceClass::model();
-
-        return in_array(SoftDeletes::class, class_uses_recursive($modelClass), true);
+        ResourceScopedQuery::applySoftDeleteScope(
+            $query,
+            $this->resourceClass::model(),
+            $this->trashedScope
+        );
     }
 
     private function applyBelongsToEagerLoads(Builder $query): void

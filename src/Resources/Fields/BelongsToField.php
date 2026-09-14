@@ -6,12 +6,15 @@ namespace SeviaFlow\Core\Resources\Fields;
 
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use LogicException;
 use SeviaFlow\Core\Resources\Resource;
 use SeviaFlow\Core\Resources\ResourceContext;
+use SeviaFlow\Core\Resources\ResourceRegistry;
+use SeviaFlow\Core\Resources\ResourceScopedQuery;
 
 final class BelongsToField extends Field
 {
@@ -24,6 +27,11 @@ final class BelongsToField extends Field
     private int $optionsLimit = self::DEFAULT_OPTIONS_LIMIT;
 
     private ?Closure $queryCallback = null;
+
+    /**
+     * @var class-string<resource>|null
+     */
+    private ?string $resourceClass = null;
 
     /**
      * @var array<int, string>
@@ -104,6 +112,100 @@ final class BelongsToField extends Field
     public function getQueryCallback(): ?Closure
     {
         return $this->queryCallback;
+    }
+
+    /**
+     * @param  class-string  $resourceClass
+     */
+    public function resource(string $resourceClass): static
+    {
+        if (! is_a($resourceClass, Resource::class, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'BelongsToField resource class [%s] must extend [%s].',
+                $resourceClass,
+                Resource::class
+            ));
+        }
+
+        /** @var class-string<resource> $resourceClass */
+        $this->resourceClass = $resourceClass;
+
+        return $this;
+    }
+
+    /**
+     * @return class-string<resource>|null
+     */
+    public function getResourceClass(): ?string
+    {
+        return $this->resourceClass;
+    }
+
+    public function applyQuery(Builder $query): Builder
+    {
+        $callback = $this->queryCallback;
+
+        if ($callback === null) {
+            return $query;
+        }
+
+        $result = $callback($query);
+
+        if ($result !== null) {
+            if (! $result instanceof Builder) {
+                throw new InvalidArgumentException(sprintf(
+                    'BelongsToField query callback for field [%s] must return [%s] or null, [%s] given.',
+                    $this->name(),
+                    Builder::class,
+                    get_debug_type($result)
+                ));
+            }
+
+            return $result;
+        }
+
+        return $query;
+    }
+
+    public function applyDependencyQuery(Builder $query, mixed $parentValue): Builder
+    {
+        $callback = $this->dependsOnCallback;
+
+        if ($callback === null) {
+            return $query;
+        }
+
+        $result = $callback($query, $parentValue);
+
+        if ($result !== null) {
+            if (! $result instanceof Builder) {
+                throw new InvalidArgumentException(sprintf(
+                    'BelongsToField dependsOn callback for field [%s] must return [%s] or null, [%s] given.',
+                    $this->name(),
+                    Builder::class,
+                    get_debug_type($result)
+                ));
+            }
+
+            return $result;
+        }
+
+        return $query;
+    }
+
+    public function applyResourceScope(Builder $query, Model $relatedModel): Builder
+    {
+        $resourceClass = $this->resourceClass;
+
+        if ($resourceClass === null && function_exists('app') && app()->bound(ResourceRegistry::class)) {
+            $resourceClass = app(ResourceRegistry::class)->findByModel($relatedModel::class);
+        }
+
+        if ($resourceClass === null) {
+            return $query;
+        }
+
+        return ResourceScopedQuery::make($resourceClass, $query);
     }
 
     /**
@@ -246,44 +348,34 @@ final class BelongsToField extends Field
             ),
         ];
 
-        if ($this->dependsOnField !== null && $this->dependsOnCallback !== null) {
-            $parentValue = $fieldValues[$this->dependsOnField] ?? null;
-
-            if ($parentValue === null || $parentValue === '') {
-                $rules[] = static function (string $attribute, mixed $value, Closure $fail): void {
-                    if ($value !== null && $value !== '') {
-                        $fail('The selected value is invalid for the current dependency.');
-                    }
-                };
-            } else {
-                $dependsOnCallback = $this->dependsOnCallback;
-                $rules[] = function (string $attribute, mixed $value, Closure $fail) use ($relation, $dependsOnCallback, $parentValue): void {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-
-                    $dependencyQuery = $relation->getRelated()->newQuery();
-                    $dependencyResult = $dependsOnCallback($dependencyQuery, $parentValue);
-
-                    if ($dependencyResult !== null) {
-                        if (! $dependencyResult instanceof Builder) {
-                            throw new InvalidArgumentException(sprintf(
-                                'BelongsToField dependsOn callback for field [%s] must return [%s] or null, [%s] given.',
-                                $this->name(),
-                                Builder::class,
-                                get_debug_type($dependencyResult)
-                            ));
-                        }
-
-                        $dependencyQuery = $dependencyResult;
-                    }
-
-                    if (! $dependencyQuery->whereKey($value)->exists()) {
-                        $fail('The selected value is invalid for the current dependency.');
-                    }
-                };
+        $rules[] = function (string $attribute, mixed $value, Closure $fail) use ($relation, $fieldValues): void {
+            if ($value === null || $value === '') {
+                return;
             }
-        }
+
+            $query = $relation->getRelated()->newQuery();
+            $query = $this->applyQuery($query);
+
+            if ($this->isDependent()) {
+                $parentValue = $fieldValues[$this->getDependsOnField()] ?? null;
+
+                if ($parentValue === null || $parentValue === '') {
+                    $fail('The selected value is invalid for the current dependency.');
+
+                    return;
+                }
+
+                $query = $this->applyDependencyQuery($query, $parentValue);
+            }
+
+            $query = $this->applyResourceScope($query, $relation->getRelated());
+
+            if (! $query->whereKey($value)->exists()) {
+                $fail($this->isDependent()
+                    ? 'The selected value is invalid for the current dependency.'
+                    : 'The selected value is invalid.');
+            }
+        };
 
         return $rules;
     }

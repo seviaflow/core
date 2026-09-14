@@ -66,23 +66,7 @@ final class BelongsToFieldOptions
             ->newQuery()
             ->select([$ownerKey, $titleAttribute]);
 
-        $callback = $field->getQueryCallback();
-        if ($callback !== null) {
-            $result = $callback($query);
-
-            if ($result !== null) {
-                if (! $result instanceof Builder) {
-                    throw new InvalidArgumentException(sprintf(
-                        'BelongsToField query callback for field [%s] must return [%s] or null, [%s] given.',
-                        $field->name(),
-                        Builder::class,
-                        get_debug_type($result)
-                    ));
-                }
-
-                $query = $result;
-            }
-        }
+        $query = $field->applyQuery($query);
 
         $dependsOnField = $field->getDependsOnField();
         $dependsOnCallback = $field->getDependsOnCallback();
@@ -93,21 +77,10 @@ final class BelongsToFieldOptions
                 return [];
             }
 
-            $dependencyResult = $dependsOnCallback($query, $parentValue);
-
-            if ($dependencyResult !== null) {
-                if (! $dependencyResult instanceof Builder) {
-                    throw new InvalidArgumentException(sprintf(
-                        'BelongsToField dependsOn callback for field [%s] must return [%s] or null, [%s] given.',
-                        $field->name(),
-                        Builder::class,
-                        get_debug_type($dependencyResult)
-                    ));
-                }
-
-                $query = $dependencyResult;
-            }
+            $query = $field->applyDependencyQuery($query, $parentValue);
         }
+
+        $query = $field->applyResourceScope($query, $relation->getRelated());
 
         $searchColumns = $field->getSearchableOptionColumns();
         if ($searchTerm !== '' && $searchColumns !== []) {

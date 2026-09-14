@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Validator;
 use SeviaFlow\Core\Forms\BelongsToFieldOptions;
 use SeviaFlow\Core\Resources\Fields\BelongsToField;
+use SeviaFlow\Core\Resources\Resource;
 
 beforeEach(function (): void {
     Schema::create('belongs_to_options_companies', function (Blueprint $table): void {
@@ -102,6 +105,32 @@ it('throws clear error when query callback returns invalid value', function (): 
         ->toThrow(InvalidArgumentException::class, 'BelongsToField query callback');
 });
 
+it('applies the related resource scope to options and validation', function (): void {
+    $allowed = BelongsToOptionsCompany::query()->create([
+        'name' => 'Allowed',
+        'active' => true,
+        'tenant_id' => 2,
+    ]);
+    $forbidden = BelongsToOptionsCompany::query()->create([
+        'name' => 'Forbidden',
+        'active' => true,
+        'tenant_id' => 1,
+    ]);
+
+    $field = BelongsToField::make('company_id')
+        ->relationship('company', 'name')
+        ->resource(BelongsToOptionsCompanyResource::class);
+
+    $options = (new BelongsToFieldOptions)->resolve([$field], BelongsToOptionsUser::class);
+    $rules = $field->defaultValidationRules(modelClass: BelongsToOptionsUser::class);
+
+    expect($options['company_id'])->toBe([(string) $allowed->getKey() => 'Allowed'])
+        ->and(Validator::make(['company_id' => $allowed->getKey()], ['company_id' => $rules])->passes())
+        ->toBeTrue()
+        ->and(Validator::make(['company_id' => $forbidden->getKey()], ['company_id' => $rules])->fails())
+        ->toBeTrue();
+});
+
 final class BelongsToOptionsUser extends Model
 {
     protected $table = 'belongs_to_options_users';
@@ -119,4 +148,14 @@ final class BelongsToOptionsCompany extends Model
     protected $table = 'belongs_to_options_companies';
 
     protected $guarded = [];
+}
+
+final class BelongsToOptionsCompanyResource extends Resource
+{
+    protected static string $model = BelongsToOptionsCompany::class;
+
+    public static function query(Builder $query): Builder
+    {
+        return $query->where('tenant_id', 2);
+    }
 }
