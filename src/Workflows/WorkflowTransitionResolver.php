@@ -65,6 +65,10 @@ final class WorkflowTransitionResolver
                 continue;
             }
 
+            if (! $transition->canRunFor($record, $user, $context)) {
+                continue;
+            }
+
             $available[] = $transition;
         }
 

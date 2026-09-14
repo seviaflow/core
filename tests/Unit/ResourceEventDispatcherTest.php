@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SeviaFlow\Core\Events\Resources\ResourceCreated;
 use SeviaFlow\Core\Events\Resources\ResourceDeleted;
@@ -161,6 +162,38 @@ it('resource restored laravel event is dispatched', function (): void {
     $dispatcher->dispatch(ResourceEventDispatcherNoHandlersResource::class, ResourceEventContext::OPERATION_RESTORED, $record, $context);
 
     Event::assertDispatched(ResourceRestored::class, 1);
+});
+
+it('dispatches the same after-commit effect only once per correlation', function (): void {
+    Event::fake();
+
+    $dispatcher = new ResourceEventDispatcher;
+    $record = new ResourceEventDispatcherRecord;
+    $context = new ResourceEventContext(
+        user: null,
+        resourceClass: ResourceEventDispatcherNoHandlersResource::class,
+        resourceSlug: 'demo',
+        operation: ResourceEventContext::OPERATION_CREATED,
+        source: ResourceEventContext::SOURCE_SYSTEM,
+        correlationId: 'corr-duplicate',
+    );
+
+    DB::transaction(function () use ($dispatcher, $record, $context): void {
+        $dispatcher->dispatchAfterCommit(
+            ResourceEventDispatcherNoHandlersResource::class,
+            ResourceEventContext::OPERATION_CREATED,
+            $record,
+            $context,
+        );
+        $dispatcher->dispatchAfterCommit(
+            ResourceEventDispatcherNoHandlersResource::class,
+            ResourceEventContext::OPERATION_CREATED,
+            $record,
+            $context,
+        );
+    });
+
+    Event::assertDispatched(ResourceCreated::class, 1);
 });
 
 it('laravel listener exception bubbles predictably', function (): void {

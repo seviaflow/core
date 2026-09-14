@@ -23,8 +23,9 @@ final class WorkflowActivityLogger
     ): WorkflowActivity {
         [$userType, $userId] = $this->resolveUserIdentity($user);
 
-        /** @var WorkflowActivity $activity */
-        $activity = WorkflowActivity::query()->create([
+        $activity = new WorkflowActivity;
+        $activity->setConnection($record->getConnectionName());
+        $activity->fill([
             'resource' => $resourceClass,
             'record_type' => $record::class,
             'record_id' => (string) $record->getKey(),
@@ -35,6 +36,7 @@ final class WorkflowActivityLogger
             'user_id' => $userId,
             'comment' => $comment,
         ]);
+        $activity->save();
 
         return $activity;
     }

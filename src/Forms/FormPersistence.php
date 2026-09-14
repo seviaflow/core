@@ -37,9 +37,16 @@ final class FormPersistence
         Model $model,
         array $fields,
         array $validatedFieldValues,
-        ResourceContext $context
+        ResourceContext $context,
+        ?string $resourceClass = null,
     ): Model {
-        return $this->operationService->persist($model, $fields, $validatedFieldValues, $context);
+        return $this->operationService->persist(
+            model: $model,
+            fields: $fields,
+            values: $validatedFieldValues,
+            context: $context,
+            resourceClass: $resourceClass,
+        );
     }
 
     /**

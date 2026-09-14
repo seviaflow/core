@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Workflows;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use LogicException;
+use SeviaFlow\Core\Exceptions\WorkflowTransitionConflictException;
 use SeviaFlow\Core\Resources\Resource;
+use SeviaFlow\Core\Resources\ResourceAuthorization;
+use SeviaFlow\Core\Resources\ResourceScopedQuery;
 use SeviaFlow\Core\Resources\Workflows\TransitionContext;
 
 final class WorkflowTransitionExecutor
@@ -48,70 +51,117 @@ final class WorkflowTransitionExecutor
             ));
         }
 
-        $currentState = $this->resolver->currentState($resourceClass, $record);
+        $requestedState = $this->resolver->currentState($resourceClass, $record);
 
-        if ($currentState === null) {
-            throw new LogicException(sprintf(
-                'Current workflow state could not be resolved for resource [%s].',
-                $resourceClass
-            ));
-        }
+        $transitionedRecord = $record->getConnection()->transaction(function () use (
+            $resourceClass,
+            $record,
+            $transitionName,
+            $transition,
+            $workflow,
+            $requestedState,
+            $user,
+            $comment,
+            $confirmed
+        ): Model {
+            $lockedRecord = ResourceScopedQuery::make($resourceClass, $record->newQuery())
+                ->whereKey($record->getKey())
+                ->lockForUpdate()
+                ->first();
 
-        if (! in_array($currentState, $transition->getFromStates(), true)) {
-            throw new LogicException(sprintf(
-                'Workflow transition [%s] cannot run from state [%s].',
-                $transitionName,
-                $currentState
-            ));
-        }
+            if (! $lockedRecord instanceof Model) {
+                throw new WorkflowTransitionConflictException;
+            }
 
-        $context = new TransitionContext(
-            user: $user,
-            resourceClass: $resourceClass,
-            transition: $transitionName,
-            fromState: $currentState,
-            toState: $transition->getToState(),
-            comment: $comment,
-            workflow: $workflow
-        );
+            $currentState = $this->resolver->currentState($resourceClass, $lockedRecord);
+            if ($currentState === null) {
+                throw new LogicException(sprintf(
+                    'Current workflow state could not be resolved for resource [%s].',
+                    $resourceClass
+                ));
+            }
 
-        if (! $transition->isAuthorizedFor($user, $record, $context)) {
-            throw new LogicException(sprintf(
-                'You are not authorized to run workflow transition [%s].',
-                $transitionName
-            ));
-        }
+            if ($requestedState !== $currentState) {
+                throw new WorkflowTransitionConflictException;
+            }
 
-        if (! $transition->canRunFor($record, $user, $context)) {
-            throw new LogicException(sprintf(
-                'Workflow transition [%s] is blocked by run conditions.',
-                $transitionName
-            ));
-        }
+            if (! in_array($currentState, $transition->getFromStates(), true)) {
+                throw new LogicException(sprintf(
+                    'Workflow transition [%s] cannot run from state [%s].',
+                    $transitionName,
+                    $currentState
+                ));
+            }
 
-        if ($transition->shouldRequireComment() && trim((string) $comment) === '') {
-            throw new InvalidArgumentException(sprintf(
-                'Workflow transition [%s] requires a comment.',
-                $transitionName
-            ));
-        }
+            $context = new TransitionContext(
+                user: $user,
+                resourceClass: $resourceClass,
+                transition: $transitionName,
+                fromState: $currentState,
+                toState: $transition->getToState(),
+                comment: $comment,
+                workflow: $workflow
+            );
 
-        if ($transition->shouldRequireConfirmation() && ! $confirmed) {
-            throw new InvalidArgumentException(sprintf(
-                'Workflow transition [%s] requires explicit confirmation.',
-                $transitionName
-            ));
-        }
+            if (! $this->canUpdateRecord($resourceClass, $lockedRecord, $user)) {
+                throw new LogicException(sprintf(
+                    'You are not authorized to run workflow transition [%s].',
+                    $transitionName
+                ));
+            }
 
-        $toState = $transition->getToState();
-        $stateField = $workflow->getStateField();
-        DB::transaction(function () use ($record, $transition, $context, $stateField, $toState): void {
-            $record->setAttribute($stateField, $toState);
-            $record->save();
-            $transition->execute($record, $context);
-            $this->activityLogger->logFromContext($record, $context);
+            if (! $transition->isAuthorizedFor($user, $lockedRecord, $context)) {
+                throw new LogicException(sprintf(
+                    'You are not authorized to run workflow transition [%s].',
+                    $transitionName
+                ));
+            }
+
+            if (! $transition->canRunFor($lockedRecord, $user, $context)) {
+                throw new LogicException(sprintf(
+                    'Workflow transition [%s] is blocked by run conditions.',
+                    $transitionName
+                ));
+            }
+
+            if ($transition->shouldRequireComment() && trim((string) $comment) === '') {
+                throw new InvalidArgumentException(sprintf(
+                    'Workflow transition [%s] requires a comment.',
+                    $transitionName
+                ));
+            }
+
+            if ($transition->shouldRequireConfirmation() && ! $confirmed) {
+                throw new InvalidArgumentException(sprintf(
+                    'Workflow transition [%s] requires explicit confirmation.',
+                    $transitionName
+                ));
+            }
+
+            $lockedRecord->setAttribute($workflow->getStateField(), $transition->getToState());
+            $lockedRecord->save();
+            $transition->execute($lockedRecord, $context);
+            $this->activityLogger->logFromContext($lockedRecord, $context);
+
+            return $lockedRecord;
         });
 
+        $record->setRawAttributes($transitionedRecord->getAttributes());
+        $record->setRelations($transitionedRecord->getRelations());
+        $record->syncOriginal();
+
         return $record;
+    }
+
+    /**
+     * @param  class-string<resource>  $resourceClass
+     */
+    private function canUpdateRecord(string $resourceClass, Model $record, mixed $user): bool
+    {
+        if ($user !== null && ! $user instanceof Authenticatable) {
+            return true;
+        }
+
+        return ResourceAuthorization::for($resourceClass)->canUpdate($user, $record);
     }
 }

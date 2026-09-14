@@ -7,6 +7,7 @@ namespace SeviaFlow\Core\Operations;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Forms\FieldValueNormalizer;
 use SeviaFlow\Core\Forms\FormFields;
 use SeviaFlow\Core\Resources\Fields\Field;
@@ -17,6 +18,9 @@ use SeviaFlow\Core\Resources\Resource;
 use SeviaFlow\Core\Resources\ResourceContext;
 use SeviaFlow\Core\Resources\ResourceEventContext;
 use SeviaFlow\Core\Resources\ResourceEventDispatcher;
+use SeviaFlow\Core\Resources\ResourceRegistry;
+use SeviaFlow\Core\Workflows\WorkflowStateFieldGuard;
+use Throwable;
 
 final class ResourceOperationService
 {
@@ -24,20 +28,41 @@ final class ResourceOperationService
         private readonly FormFields $formFields = new FormFields,
         private readonly FieldValueNormalizer $valueNormalizer = new FieldValueNormalizer,
         private readonly ResourceEventDispatcher $resourceEventDispatcher = new ResourceEventDispatcher,
+        private readonly WorkflowStateFieldGuard $workflowStateFieldGuard = new WorkflowStateFieldGuard,
     ) {}
 
     /**
      * @param  array<int, Field>  $fields
      * @param  array<string, mixed>  $values
      */
-    public function persist(Model $model, array $fields, array $values, ResourceContext $context): Model
-    {
-        return $this->transaction($model, function () use ($model, $fields, $values, $context): Model {
-            $this->applyValues($model, $fields, $values, $context);
-            $model->save();
+    public function persist(
+        Model $model,
+        array $fields,
+        array $values,
+        ResourceContext $context,
+        ?string $resourceClass = null,
+    ): Model {
+        $fileLifecycle = new FileLifecycleManager($fields);
+        $resolvedResourceClass = $this->resolveResourceClass($model, $resourceClass);
 
-            return $model;
-        });
+        try {
+            return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass): Model {
+                if ($resolvedResourceClass !== null) {
+                    $this->workflowStateFieldGuard->ensurePayloadDoesNotWriteStateField($resolvedResourceClass, $values);
+                    $this->workflowStateFieldGuard->initialize($resolvedResourceClass, $model, $context);
+                }
+
+                $this->applyValues($model, $fields, $values, $context, $fileLifecycle);
+                $model->save();
+                $fileLifecycle->finalize($model);
+
+                return $model;
+            });
+        } catch (Throwable $exception) {
+            $fileLifecycle->rollback();
+
+            throw $exception;
+        }
     }
 
     /**
@@ -54,62 +79,78 @@ final class ResourceOperationService
         ResourceContext $context,
         ResourceOperationContext $operationContext,
         ?callable $save = null,
+        ?FileLifecycleManager $fileLifecycle = null,
     ): Model {
-        return $this->transaction($model, function () use (
-            $resourceClass,
-            $resourceSlug,
-            $model,
-            $fields,
-            $values,
-            $context,
-            $operationContext,
-            $save,
-        ): Model {
-            $isCreate = ! $model->exists;
-            $original = is_array($model->getOriginal()) ? $model->getOriginal() : [];
-            $changes = $this->applyValues($model, $fields, $values, $context);
-            $beforeEvent = $isCreate
-                ? ResourceEventContext::OPERATION_CREATING
-                : ResourceEventContext::OPERATION_UPDATING;
-            $afterEvent = $isCreate
-                ? ResourceEventContext::OPERATION_CREATED
-                : ResourceEventContext::OPERATION_UPDATED;
+        $fileLifecycle ??= new FileLifecycleManager($fields);
 
-            $this->dispatch(
-                resourceClass: $resourceClass,
-                resourceSlug: $resourceSlug,
-                event: $beforeEvent,
-                model: $model,
-                original: $original,
-                changes: $changes,
-                operationContext: $operationContext,
-                result: 'pending',
-            );
+        try {
+            return $this->transaction($model, function () use (
+                $resourceClass,
+                $resourceSlug,
+                $model,
+                $fields,
+                $values,
+                $context,
+                $operationContext,
+                $save,
+                $fileLifecycle,
+            ): Model {
+                $isCreate = ! $model->exists;
+                $original = is_array($model->getOriginal()) ? $model->getOriginal() : [];
+                $this->workflowStateFieldGuard->ensurePayloadDoesNotWriteStateField($resourceClass, $values);
+                $changes = $this->workflowStateFieldGuard->initialize($resourceClass, $model, $context);
+                $changes = array_merge(
+                    $changes,
+                    $this->applyValues($model, $fields, $values, $context, $fileLifecycle)
+                );
+                $beforeEvent = $isCreate
+                    ? ResourceEventContext::OPERATION_CREATING
+                    : ResourceEventContext::OPERATION_UPDATING;
+                $afterEvent = $isCreate
+                    ? ResourceEventContext::OPERATION_CREATED
+                    : ResourceEventContext::OPERATION_UPDATED;
 
-            if ($save !== null) {
-                $save($model);
-            } else {
-                $model->save();
-            }
-
-            $this->resourceEventDispatcher->dispatchAfterCommit(
-                resourceClass: $resourceClass,
-                event: $afterEvent,
-                record: $model,
-                context: $this->eventContext(
+                $this->dispatch(
                     resourceClass: $resourceClass,
                     resourceSlug: $resourceSlug,
-                    event: $afterEvent,
+                    event: $beforeEvent,
                     model: $model,
                     original: $original,
                     changes: $changes,
                     operationContext: $operationContext,
-                    result: 'committed',
-                ),
-            );
+                    result: 'pending',
+                );
 
-            return $model;
-        });
+                if ($save !== null) {
+                    $save($model);
+                } else {
+                    $model->save();
+                }
+
+                $fileLifecycle->finalize($model);
+                $this->resourceEventDispatcher->dispatchAfterCommit(
+                    resourceClass: $resourceClass,
+                    event: $afterEvent,
+                    record: $model,
+                    context: $this->eventContext(
+                        resourceClass: $resourceClass,
+                        resourceSlug: $resourceSlug,
+                        event: $afterEvent,
+                        model: $model,
+                        original: $original,
+                        changes: $changes,
+                        operationContext: $operationContext,
+                        result: 'committed',
+                    ),
+                );
+
+                return $model;
+            });
+        } catch (Throwable $exception) {
+            $fileLifecycle->rollback();
+
+            throw $exception;
+        }
     }
 
     /**
@@ -117,8 +158,13 @@ final class ResourceOperationService
      * @param  array<string, mixed>  $values
      * @return array<string, mixed>
      */
-    public function applyValues(Model $model, array $fields, array $values, ResourceContext $context): array
-    {
+    public function applyValues(
+        Model $model,
+        array $fields,
+        array $values,
+        ResourceContext $context,
+        ?FileLifecycleManager $fileLifecycle = null,
+    ): array {
         $fieldMap = [];
 
         foreach ($this->formFields->persistable($fields, $context) as $field) {
@@ -140,8 +186,22 @@ final class ResourceOperationService
                     continue;
                 }
 
-                if ($fieldMap[$name] instanceof FileField && ! ($value instanceof UploadedFile)) {
-                    continue;
+                if ($fieldMap[$name] instanceof FileField) {
+                    if ($fileLifecycle === null && ! ($value instanceof UploadedFile)) {
+                        continue;
+                    }
+
+                    if ($fileLifecycle !== null) {
+                        $fileChange = $fileLifecycle->apply($model, $fieldMap[$name], $value);
+                        if (! $fileChange['changed']) {
+                            continue;
+                        }
+
+                        $changes[$name] = $fileChange['value'];
+                        $model->setAttribute($name, $fileChange['value']);
+
+                        continue;
+                    }
                 }
 
                 $changes[$name] = $this->valueNormalizer->normalize(
@@ -243,6 +303,23 @@ final class ResourceOperationService
     private function transaction(Model $model, Closure $callback): Model
     {
         return $model->getConnection()->transaction($callback);
+    }
+
+    /**
+     * @param  class-string<resource>|null  $resourceClass
+     * @return class-string<resource>|null
+     */
+    private function resolveResourceClass(Model $model, ?string $resourceClass): ?string
+    {
+        if ($resourceClass !== null) {
+            return $resourceClass;
+        }
+
+        if (! function_exists('app') || ! app()->bound(ResourceRegistry::class)) {
+            return null;
+        }
+
+        return app(ResourceRegistry::class)->findByModel($model::class);
     }
 
     /**

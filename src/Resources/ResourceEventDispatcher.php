@@ -19,6 +19,11 @@ use SeviaFlow\Core\Events\Resources\ResourceUpdating;
 final class ResourceEventDispatcher
 {
     /**
+     * @var array<string, true>
+     */
+    private array $dispatchedAfterCommit = [];
+
+    /**
      * @param  class-string<\SeviaFlow\Core\Resources\Resource>  $resourceClass
      */
     public function dispatch(
@@ -45,15 +50,37 @@ final class ResourceEventDispatcher
         mixed $record,
         ResourceEventContext $context
     ): void {
+        $key = implode('|', [
+            $event,
+            $record instanceof Model ? $record::class : get_debug_type($record),
+            $record instanceof Model ? (string) $record->getKey() : '',
+            $context->correlationId(),
+        ]);
+
         if (! $record instanceof Model || $record->getConnection()->transactionLevel() === 0) {
-            $this->dispatch($resourceClass, $event, $record, $context);
+            $this->dispatchOnce($key, $resourceClass, $event, $record, $context);
 
             return;
         }
 
-        $record->getConnection()->afterCommit(function () use ($resourceClass, $event, $record, $context): void {
-            $this->dispatch($resourceClass, $event, $record, $context);
+        $record->getConnection()->afterCommit(function () use ($key, $resourceClass, $event, $record, $context): void {
+            $this->dispatchOnce($key, $resourceClass, $event, $record, $context);
         });
+    }
+
+    private function dispatchOnce(
+        string $key,
+        string $resourceClass,
+        string $event,
+        mixed $record,
+        ResourceEventContext $context
+    ): void {
+        if (isset($this->dispatchedAfterCommit[$key])) {
+            return;
+        }
+
+        $this->dispatch($resourceClass, $event, $record, $context);
+        $this->dispatchedAfterCommit[$key] = true;
     }
 
     private function executeHandler(

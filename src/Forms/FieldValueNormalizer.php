@@ -37,7 +37,10 @@ final class FieldValueNormalizer
                 return null;
             }
 
-            return $value->store($field->getDirectory(), $field->getDisk());
+            return $value->store($field->getDirectory(), [
+                'disk' => $field->getDisk(),
+                'visibility' => $field->getVisibility(),
+            ]);
         }
 
         if ($field instanceof ToggleField) {

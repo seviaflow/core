@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use SeviaFlow\Core\Exceptions\WorkflowTransitionConflictException;
 use SeviaFlow\Core\Resources\Resource;
 use SeviaFlow\Core\Resources\Workflows\State;
 use SeviaFlow\Core\Resources\Workflows\Transition;
@@ -76,6 +77,27 @@ it('invalid transition from wrong state is rejected', function (): void {
         $record,
         'submit'
     ))->toThrow(LogicException::class, 'cannot run from state');
+});
+
+it('rejects a stale transition after the record state changes', function (): void {
+    $record = WorkflowExecutorRecord::query()->create(['status' => 'draft']);
+    $staleRecord = WorkflowExecutorRecord::query()->findOrFail($record->getKey());
+
+    DB::table('workflow_executor_records')
+        ->where('id', $record->getKey())
+        ->update(['status' => 'pending']);
+
+    expect(fn () => (new WorkflowTransitionExecutor)->execute(
+        WorkflowExecutorResource::class,
+        $staleRecord,
+        'submit'
+    ))->toThrow(
+        WorkflowTransitionConflictException::class,
+        'record changed'
+    );
+
+    expect($record->fresh()?->status)->toBe('pending')
+        ->and(WorkflowActivity::query()->count())->toBe(0);
 });
 
 it('unknown transition is rejected', function (): void {

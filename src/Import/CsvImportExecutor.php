@@ -7,6 +7,7 @@ namespace SeviaFlow\Core\Import;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Forms\FieldValidationBridge;
 use SeviaFlow\Core\Operations\ResourceOperationContext;
 use SeviaFlow\Core\Operations\ResourceOperationService;
@@ -22,6 +23,7 @@ use SeviaFlow\Core\Resources\ImportResource;
 use SeviaFlow\Core\Resources\Resource;
 use SeviaFlow\Core\Resources\ResourceContext;
 use SeviaFlow\Core\Resources\ResourceEventContext;
+use Throwable;
 
 final class CsvImportExecutor
 {
@@ -180,29 +182,46 @@ final class CsvImportExecutor
             return $this->failure($rowErrors, []);
         }
 
-        $model->getConnection()->transaction(function () use ($modelClass, $records, $resourceClass, $allowedFields, $user, $request): void {
-            $resourceSlug = $this->resourceSlug($resourceClass);
-            $fields = $this->operationService->fieldsForResource($resourceClass, $allowedFields);
+        $fileLifecycle = new FileLifecycleManager($fields);
 
-            foreach ($records as $index => $record) {
-                /** @var Model $created */
-                $created = new $modelClass;
-                $this->operationService->execute(
-                    resourceClass: $resourceClass,
-                    resourceSlug: $resourceSlug,
-                    model: $created,
-                    fields: $fields,
-                    values: $record,
-                    context: ResourceContext::Create,
-                    operationContext: new ResourceOperationContext(
-                        actor: $user,
-                        source: ResourceEventContext::SOURCE_IMPORT,
-                        request: $request,
-                        metadata: ['row' => $index + 1],
-                    ),
-                );
-            }
-        });
+        try {
+            $model->getConnection()->transaction(function () use (
+                $modelClass,
+                $records,
+                $resourceClass,
+                $allowedFields,
+                $user,
+                $request,
+                $fileLifecycle,
+            ): void {
+                $resourceSlug = $this->resourceSlug($resourceClass);
+                $fields = $this->operationService->fieldsForResource($resourceClass, $allowedFields);
+
+                foreach ($records as $index => $record) {
+                    /** @var Model $created */
+                    $created = new $modelClass;
+                    $this->operationService->execute(
+                        resourceClass: $resourceClass,
+                        resourceSlug: $resourceSlug,
+                        model: $created,
+                        fields: $fields,
+                        values: $record,
+                        context: ResourceContext::Create,
+                        operationContext: new ResourceOperationContext(
+                            actor: $user,
+                            source: ResourceEventContext::SOURCE_IMPORT,
+                            request: $request,
+                            metadata: ['row' => $index + 1],
+                        ),
+                        fileLifecycle: $fileLifecycle,
+                    );
+                }
+            });
+        } catch (Throwable $exception) {
+            $fileLifecycle->rollback();
+
+            throw $exception;
+        }
 
         return [
             'imported_count' => count($records),
