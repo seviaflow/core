@@ -62,7 +62,8 @@ final class FormPersistence
         array $validatedFieldValues,
         ResourceContext $context,
         mixed $user = null,
-        ?Request $request = null
+        ?Request $request = null,
+        ?FormState $state = null
     ): Model {
         return $this->operationService->execute(
             resourceClass: $resourceClass,
@@ -76,6 +77,7 @@ final class FormPersistence
                 source: ResourceEventContext::SOURCE_FORM,
                 request: $request,
             ),
+            state: $state,
         );
     }
 }

@@ -86,6 +86,21 @@ it('uses the host hashed cast exactly once', function (): void {
     expect(Hash::check('cast-secret', (string) $model->fresh()?->getAttribute('password')))->toBeTrue();
 });
 
+it('leaves empty create values to database defaults', function (): void {
+    $model = new ResourceOperationServiceRecord;
+
+    (new ResourceOperationService)->applyValues(
+        $model,
+        [TextField::make('name'), ToggleField::make('is_active'), MoneyField::make('amount')],
+        ['name' => 'Defaults', 'is_active' => null, 'amount' => null],
+        ResourceContext::Create
+    );
+    $model->save();
+
+    expect($model->fresh()?->getAttribute('is_active'))->toBeFalse()
+        ->and($model->fresh()?->getAttribute('amount'))->toBeNull();
+});
+
 it('dispatches before save and after commit with actor source connection and safe changes', function (): void {
     $model = new ResourceOperationServiceRecord;
 

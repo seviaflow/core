@@ -47,6 +47,8 @@ final class MoneyField extends NumberField
 
         $this->scale = $scale;
 
+        $this->precision($scale);
+
         return $this;
     }
 

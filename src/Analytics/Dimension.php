@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Analytics;
 
 use InvalidArgumentException;
+use SeviaFlow\Core\Resources\Resource;
 
 final class Dimension
 {
@@ -19,9 +20,7 @@ final class Dimension
 
     private ?string $field = null;
 
-    /**
-     * @var array{path:array<int, string>, key_attribute:string|null, label_attribute:string, mode:string, relationship?:string, title_attribute?:string}|null
-     */
+    /** @var array<string, mixed>|null */
     private ?array $relationship = null;
 
     private string $type = 'string';
@@ -188,6 +187,59 @@ final class Dimension
         return $this;
     }
 
+    /**
+     * Set the Resource classes that govern every hop in this relationship path.
+     *
+     * @param  array<int, mixed>  $resourceClasses
+     */
+    public function relationshipResources(array $resourceClasses): self
+    {
+        if ($this->relationship === null) {
+            throw new InvalidArgumentException('Analytics relationship resources require relationship() or relationshipPath() first.');
+        }
+
+        if (count($resourceClasses) !== $this->relationshipDepth()) {
+            throw new InvalidArgumentException(sprintf(
+                'Analytics relationship requires one Resource class per hop; expected %d, got %d.',
+                $this->relationshipDepth(),
+                count($resourceClasses)
+            ));
+        }
+
+        $normalized = [];
+        foreach ($resourceClasses as $resourceClass) {
+            if (! is_string($resourceClass) || ! is_a($resourceClass, Resource::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Analytics relationship Resource [%s] must extend %s.',
+                    is_scalar($resourceClass) ? (string) $resourceClass : get_debug_type($resourceClass),
+                    Resource::class
+                ));
+            }
+
+            $normalized[] = $resourceClass;
+        }
+
+        $this->relationship['resource_classes'] = $normalized;
+
+        return $this;
+    }
+
+    /**
+     * @param  class-string<resource>  $resourceClass
+     */
+    public function relationshipResource(string $resourceClass): self
+    {
+        return $this->relationshipResources([$resourceClass]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function relationshipResourceClasses(): array
+    {
+        return $this->relationship['resource_classes'] ?? [];
+    }
+
     public function type(string $type): self
     {
         $normalized = strtolower(trim($type));
@@ -252,7 +304,7 @@ final class Dimension
     }
 
     /**
-     * @return array{path:array<int, string>, key_attribute:string|null, label_attribute:string, mode:string, relationship?:string, title_attribute?:string}|null
+     * @return array<string, mixed>|null
      */
     public function relationshipDefinition(): ?array
     {

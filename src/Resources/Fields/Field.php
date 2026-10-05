@@ -7,6 +7,7 @@ namespace SeviaFlow\Core\Resources\Fields;
 use Closure;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
+use SeviaFlow\Core\Forms\FormState;
 use SeviaFlow\Core\Resources\Fields\Support\FieldContextState;
 use SeviaFlow\Core\Resources\Fields\Support\FieldVisibilityRules;
 use SeviaFlow\Core\Resources\Fields\Validation\FieldValidationState;
@@ -26,6 +27,17 @@ abstract class Field
     private ?string $help = null;
 
     private ?string $placeholder = null;
+
+    private mixed $defaultValue = null;
+
+    private bool $hasDefaultValue = false;
+
+    private ?int $columnSpan = null;
+
+    /**
+     * @var array<int, array{fields: array<int, string>, condition: Closure, type: string}>
+     */
+    private array $conditionalStates = [];
 
     private bool $disabled = false;
 
@@ -118,6 +130,57 @@ abstract class Field
         return $this->normalizeStringValue($value);
     }
 
+    public function default(mixed $value): static
+    {
+        $this->defaultValue = $value;
+        $this->hasDefaultValue = true;
+
+        return $this;
+    }
+
+    public function hasDefault(): bool
+    {
+        return $this->hasDefaultValue;
+    }
+
+    public function getDefaultValue(FormState $state, ?Model $record = null): mixed
+    {
+        if (! $this->hasDefaultValue) {
+            return null;
+        }
+
+        return $this->defaultValue instanceof Closure
+            ? ($this->defaultValue)($state, $record)
+            : $this->defaultValue;
+    }
+
+    public function columnSpan(int|string $span): static
+    {
+        if ($span === 'full') {
+            $this->columnSpan = 12;
+
+            return $this;
+        }
+
+        if (! is_int($span) && (! is_string($span) || ! ctype_digit($span))) {
+            throw new \InvalidArgumentException('Field column span must be an integer or "full".');
+        }
+
+        $normalized = (int) $span;
+        if ($normalized < 1 || $normalized > 12) {
+            throw new \InvalidArgumentException('Field column span must be between 1 and 12.');
+        }
+
+        $this->columnSpan = $normalized;
+
+        return $this;
+    }
+
+    public function getColumnSpan(): ?int
+    {
+        return $this->columnSpan;
+    }
+
     public function prepareForValidation(mixed $value): mixed
     {
         return is_string($value) ? trim($value) : $value;
@@ -126,6 +189,11 @@ abstract class Field
     public function prepareForImport(mixed $value): mixed
     {
         return $this->prepareForValidation($value);
+    }
+
+    public function formatForInput(mixed $value): mixed
+    {
+        return $value;
     }
 
     protected function normalizeStringValue(mixed $value): mixed
@@ -389,6 +457,68 @@ abstract class Field
         return ! $this->isVisible($context);
     }
 
+    public function hiddenWhen(string|array $fields, callable $condition): static
+    {
+        $this->addConditionalState($fields, $condition, 'hidden');
+
+        return $this;
+    }
+
+    public function requiredWhen(string|array $fields, callable $condition): static
+    {
+        $this->addConditionalState($fields, $condition, 'required');
+
+        return $this;
+    }
+
+    public function disabledWhen(string|array $fields, callable $condition): static
+    {
+        $this->addConditionalState($fields, $condition, 'disabled');
+
+        return $this;
+    }
+
+    public function isVisibleForState(ResourceContext $context, ?FormState $state = null): bool
+    {
+        if (! $this->isVisible($context) || $state === null) {
+            return $this->isVisible($context);
+        }
+
+        return ! $this->conditionalStateIsActive('hidden', $state);
+    }
+
+    public function isRequiredForState(ResourceContext $context, ?FormState $state = null): bool
+    {
+        if ($this->isRequired($context)) {
+            return true;
+        }
+
+        return $state !== null && $this->conditionalStateIsActive('required', $state);
+    }
+
+    public function isDisabledForState(ResourceContext $context, ?FormState $state = null): bool
+    {
+        if ($this->isDisabled($context)) {
+            return true;
+        }
+
+        return $state !== null && $this->conditionalStateIsActive('disabled', $state);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getDependencyFields(): array
+    {
+        $dependencies = [];
+
+        foreach ($this->conditionalStates as $conditionalState) {
+            $dependencies = array_merge($dependencies, $conditionalState['fields']);
+        }
+
+        return array_values(array_unique($dependencies));
+    }
+
     public function withoutDefaultValidation(bool $condition = true): static
     {
         if ($condition) {
@@ -491,6 +621,20 @@ abstract class Field
         );
     }
 
+    /**
+     * @return array<int, mixed>
+     */
+    public function getRulesForState(ResourceContext $context, mixed $record = null, ?FormState $state = null): array
+    {
+        $rules = $this->getRulesForContext($context, $record);
+
+        if ($state !== null && $this->isRequiredForState($context, $state) && ! in_array('required', $rules, true)) {
+            array_unshift($rules, 'required');
+        }
+
+        return $rules;
+    }
+
     public function rulesOnCreate(array|Closure|string $rules): static
     {
         $this->validationState->addCreateRules($rules);
@@ -508,5 +652,38 @@ abstract class Field
     public function rulesOnUpdate(array|Closure|string $rules): static
     {
         return $this->rulesOnEdit($rules);
+    }
+
+    private function addConditionalState(string|array $fields, callable $condition, string $type): void
+    {
+        $normalizedFields = array_values(array_unique(array_filter(
+            is_array($fields) ? $fields : [$fields],
+            static fn (mixed $field): bool => is_string($field) && trim($field) !== ''
+        )));
+
+        if ($normalizedFields === []) {
+            throw new \InvalidArgumentException('Conditional field state requires at least one dependency.');
+        }
+
+        $this->conditionalStates[] = [
+            'fields' => $normalizedFields,
+            'condition' => Closure::fromCallable($condition),
+            'type' => $type,
+        ];
+    }
+
+    private function conditionalStateIsActive(string $type, FormState $state): bool
+    {
+        foreach ($this->conditionalStates as $conditionalState) {
+            if ($conditionalState['type'] !== $type) {
+                continue;
+            }
+
+            if ((bool) ($conditionalState['condition'])($state)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

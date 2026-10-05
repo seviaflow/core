@@ -20,6 +20,13 @@ final class Form
     private array $sections = [];
 
     /**
+     * @var array<int, Tab>
+     */
+    private array $tabs = [];
+
+    private ?int $columns = null;
+
+    /**
      * @param  array<int, Field>  $fields
      */
     public function fields(array $fields): self
@@ -77,6 +84,51 @@ final class Form
         return $this->sections;
     }
 
+    public function columns(int $columns): self
+    {
+        if ($columns < 1 || $columns > 12) {
+            throw new InvalidArgumentException('Form columns must be between 1 and 12.');
+        }
+
+        $this->columns = $columns;
+
+        return $this;
+    }
+
+    public function getColumns(): ?int
+    {
+        return $this->columns;
+    }
+
+    /**
+     * @param  array<int, Tab>  $tabs
+     */
+    public function tabs(array $tabs): self
+    {
+        foreach ($tabs as $index => $tab) {
+            if (! $tab instanceof Tab) {
+                throw new InvalidArgumentException(sprintf(
+                    'Form tab at index %d must be an instance of [%s], [%s] given.',
+                    $index,
+                    Tab::class,
+                    get_debug_type($tab)
+                ));
+            }
+        }
+
+        $this->tabs = array_values($tabs);
+
+        return $this;
+    }
+
+    /**
+     * @return array<int, Tab>
+     */
+    public function getTabs(): array
+    {
+        return $this->tabs;
+    }
+
     /**
      * @return array<int, Field>
      */
@@ -86,6 +138,12 @@ final class Form
 
         foreach ($this->sections as $section) {
             foreach ($section->getFields() as $field) {
+                $fields[] = $field;
+            }
+        }
+
+        foreach ($this->tabs as $tab) {
+            foreach ($tab->getAllFields() as $field) {
                 $fields[] = $field;
             }
         }

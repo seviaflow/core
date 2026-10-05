@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Resources;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use SeviaFlow\Core\Exceptions\ResourceModelNotConfiguredException;
 use SeviaFlow\Core\Resources\Relations\BelongsToManyRelation;
 use SeviaFlow\Core\Resources\Relations\HasManyRelation;
@@ -75,6 +76,53 @@ abstract class Resource
     public static function show(Form $form): Form
     {
         return static::form($form);
+    }
+
+    public static function recordTitle(Model $record): ?string
+    {
+        foreach (['name', 'title', 'order_number', 'invoice_number', 'account_number', 'number', 'sku'] as $attribute) {
+            $value = $record->getAttribute($attribute);
+
+            if (is_scalar($value) && trim((string) $value) !== '') {
+                return trim((string) $value);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function recordMetadata(Model $record): array
+    {
+        $metadata = [];
+
+        foreach ([
+            'status' => 'Status',
+            'created_at' => 'Created',
+            'updated_at' => 'Updated',
+        ] as $attribute => $label) {
+            $value = $record->getAttribute($attribute);
+
+            if ($value === null || is_array($value) || (is_object($value) && ! $value instanceof \DateTimeInterface)) {
+                continue;
+            }
+
+            $metadata[$label] = $value instanceof \DateTimeInterface
+                ? $value->format('Y-m-d H:i')
+                : (string) $value;
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public static function lazyRelations(): array
+    {
+        return [];
     }
 
     public static function api(ApiResource $api): ApiResource

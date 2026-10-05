@@ -61,6 +61,55 @@ it('enforces options limit while resolving options', function (): void {
     expect($options['company_id'])->toHaveCount(2);
 });
 
+it('includes the selected related record outside the option page', function (): void {
+    foreach (range(1, 5) as $index) {
+        BelongsToOptionsCompany::query()->create([
+            'name' => 'Company '.$index,
+            'active' => true,
+            'tenant_id' => 1,
+        ]);
+    }
+
+    $selected = BelongsToOptionsCompany::query()->create([
+        'name' => 'Selected Company',
+        'active' => true,
+        'tenant_id' => 1,
+    ]);
+    $field = BelongsToField::make('company_id')
+        ->relationship('company', 'name')
+        ->optionsLimit(2);
+
+    $options = (new BelongsToFieldOptions)->resolve(
+        [$field],
+        BelongsToOptionsUser::class,
+        [],
+        ['company_id' => (string) $selected->getKey()]
+    );
+
+    expect($options['company_id'])->toHaveKey((string) $selected->getKey(), 'Selected Company')
+        ->and($options['company_id'])->toHaveCount(3);
+});
+
+it('does not reveal a selected related record outside its resource scope', function (): void {
+    $forbidden = BelongsToOptionsCompany::query()->create([
+        'name' => 'Forbidden Selected',
+        'active' => true,
+        'tenant_id' => 1,
+    ]);
+    $field = BelongsToField::make('company_id')
+        ->relationship('company', 'name')
+        ->resource(BelongsToOptionsCompanyResource::class);
+
+    $options = (new BelongsToFieldOptions)->resolve(
+        [$field],
+        BelongsToOptionsUser::class,
+        [],
+        ['company_id' => (string) $forbidden->getKey()]
+    );
+
+    expect($options['company_id'])->not->toHaveKey((string) $forbidden->getKey());
+});
+
 it('searches only configured searchable option columns', function (): void {
     BelongsToOptionsCompany::query()->create(['name' => 'Alpha', 'email' => 'alpha@example.com', 'active' => true, 'tenant_id' => 1]);
     BelongsToOptionsCompany::query()->create(['name' => 'Beta', 'email' => 'beta@example.com', 'active' => true, 'tenant_id' => 1]);

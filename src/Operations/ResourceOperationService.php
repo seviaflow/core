@@ -10,6 +10,7 @@ use Illuminate\Http\UploadedFile;
 use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Forms\FieldValueNormalizer;
 use SeviaFlow\Core\Forms\FormFields;
+use SeviaFlow\Core\Forms\FormState;
 use SeviaFlow\Core\Resources\Fields\Field;
 use SeviaFlow\Core\Resources\Fields\FileField;
 use SeviaFlow\Core\Resources\Fields\PasswordField;
@@ -41,18 +42,19 @@ final class ResourceOperationService
         array $values,
         ResourceContext $context,
         ?string $resourceClass = null,
+        ?FormState $state = null,
     ): Model {
         $fileLifecycle = new FileLifecycleManager($fields);
         $resolvedResourceClass = $this->resolveResourceClass($model, $resourceClass);
 
         try {
-            return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass): Model {
+            return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass, $state): Model {
                 if ($resolvedResourceClass !== null) {
                     $this->workflowStateFieldGuard->ensurePayloadDoesNotWriteStateField($resolvedResourceClass, $values);
                     $this->workflowStateFieldGuard->initialize($resolvedResourceClass, $model, $context);
                 }
 
-                $this->applyValues($model, $fields, $values, $context, $fileLifecycle);
+                $this->applyValues($model, $fields, $values, $context, $fileLifecycle, $state);
                 $model->save();
                 $fileLifecycle->finalize($model);
 
@@ -80,6 +82,7 @@ final class ResourceOperationService
         ResourceOperationContext $operationContext,
         ?callable $save = null,
         ?FileLifecycleManager $fileLifecycle = null,
+        ?FormState $state = null,
     ): Model {
         $fileLifecycle ??= new FileLifecycleManager($fields);
 
@@ -94,6 +97,7 @@ final class ResourceOperationService
                 $operationContext,
                 $save,
                 $fileLifecycle,
+                $state,
             ): Model {
                 $isCreate = ! $model->exists;
                 $original = is_array($model->getOriginal()) ? $model->getOriginal() : [];
@@ -101,7 +105,7 @@ final class ResourceOperationService
                 $changes = $this->workflowStateFieldGuard->initialize($resourceClass, $model, $context);
                 $changes = array_merge(
                     $changes,
-                    $this->applyValues($model, $fields, $values, $context, $fileLifecycle)
+                    $this->applyValues($model, $fields, $values, $context, $fileLifecycle, $state)
                 );
                 $beforeEvent = $isCreate
                     ? ResourceEventContext::OPERATION_CREATING
@@ -164,10 +168,11 @@ final class ResourceOperationService
         array $values,
         ResourceContext $context,
         ?FileLifecycleManager $fileLifecycle = null,
+        ?FormState $state = null,
     ): array {
         $fieldMap = [];
 
-        foreach ($this->formFields->persistable($fields, $context) as $field) {
+        foreach ($this->formFields->persistable($fields, $context, $state) as $field) {
             $fieldMap[$field->name()] = $field;
         }
 
@@ -178,6 +183,10 @@ final class ResourceOperationService
             }
 
             if (isset($fieldMap[$name])) {
+                if (! $model->exists && ($value === null || $value === '')) {
+                    continue;
+                }
+
                 if (
                     $fieldMap[$name] instanceof PasswordField
                     && $fieldMap[$name]->shouldDehydrateOnlyWhenFilled()

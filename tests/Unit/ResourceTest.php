@@ -48,6 +48,29 @@ it('returns table unchanged by default', function (): void {
     expect($resource::table($table))->toBe($table);
 });
 
+it('provides safe default record title metadata and lazy relation contract', function (): void {
+    $resource = new class extends Resource
+    {
+        protected static string $model = ResourceMetadataModel::class;
+    };
+    $record = new ResourceMetadataModel;
+    $record->setRawAttributes([
+        'id' => 42,
+        'order_number' => 'ORD-42',
+        'status' => 'confirmed',
+        'created_at' => '2026-09-15 08:30:00',
+        'updated_at' => '2026-09-15 09:45:00',
+    ]);
+
+    expect($resource::recordTitle($record))->toBe('ORD-42')
+        ->and($resource::recordMetadata($record))->toBe([
+            'Status' => 'confirmed',
+            'Created' => '2026-09-15 08:30',
+            'Updated' => '2026-09-15 09:45',
+        ])
+        ->and($resource::lazyRelations())->toBe([]);
+});
+
 it('returns form unchanged by default', function (): void {
     $resource = new class extends Resource
     {
@@ -405,6 +428,18 @@ it('can return configured resource bulk actions', function (): void {
 });
 
 final class FakeModel {}
+
+final class ResourceMetadataModel extends Model
+{
+    protected $table = 'resource_metadata_models';
+
+    protected $guarded = [];
+
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+}
 
 final class ResourceTestInvokableEventHandler
 {

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
+use SeviaFlow\Core\Resources\ResourceScopedQuery;
 
 final class AnalyticsCompiler
 {
@@ -155,7 +156,7 @@ final class AnalyticsCompiler
 
     /**
      * @param  array{dimension:string, grain:string, from:string|null, to:string|null}|null  $time
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      */
     private function applyTimeRange(Builder $query, AnalyticsDataset $dataset, ?array $time, array &$joins): void
     {
@@ -176,7 +177,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      */
     private function applyFilter(Builder $query, AnalyticsDataset $dataset, AnalyticsFilter $filter, array &$joins): void
     {
@@ -186,7 +187,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      * @return array{0:string, 1:array<int, mixed>}
      */
     private function filterSql(Builder $query, AnalyticsDataset $dataset, AnalyticsFilter $filter, array &$joins): array
@@ -238,7 +239,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      */
     private function filterFieldSql(Builder $query, AnalyticsDataset $dataset, string $field, array &$joins): string
     {
@@ -254,7 +255,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      * @return array{
      *   value_sql:string,
      *   value_bindings:array<int, mixed>,
@@ -284,7 +285,7 @@ final class AnalyticsCompiler
             throw new InvalidArgumentException(sprintf('Analytics dimension [%s] must define field() or relationship().', $dimension->key()));
         }
 
-        $resolved = $this->ensureRelationshipPath($query, $relationship['path'], $joins);
+        $resolved = $this->ensureRelationshipPath($query, $relationship['path'], $dimension->relationshipResourceClasses(), $joins);
         $alias = $resolved['alias'];
         $relatedValue = $relationship['mode'] === 'entity'
             ? ($relationship['key_attribute'] ?? $resolved['owner_key'])
@@ -311,13 +312,21 @@ final class AnalyticsCompiler
 
     /**
      * @param  array<int, string>  $path
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
-     * @return array{alias:string, model:class-string<Model>, owner_key:string}
+     * @param  array<int, string>  $resourceClasses
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
+     * @return array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}
      */
-    private function ensureRelationshipPath(Builder $query, array $path, array &$joins): array
+    private function ensureRelationshipPath(Builder $query, array $path, array $resourceClasses, array &$joins): array
     {
         if ($path === []) {
             throw new InvalidArgumentException('Analytics relationship path cannot be empty.');
+        }
+
+        if (count($resourceClasses) !== count($path)) {
+            throw new InvalidArgumentException(sprintf(
+                'Analytics relationship path [%s] must declare one governing Resource per hop.',
+                implode('.', $path)
+            ));
         }
 
         $parentModel = $query->getModel();
@@ -325,18 +334,44 @@ final class AnalyticsCompiler
         $prefix = [];
         $resolved = null;
 
-        foreach ($path as $relationship) {
+        foreach ($path as $index => $relationship) {
             $prefix[] = $relationship;
             $joinKey = implode('.', $prefix);
+
+            $resourceClass = $resourceClasses[$index] ?? null;
+            if ($resourceClass === null) {
+                throw new InvalidArgumentException(sprintf(
+                    'Analytics relationship hop [%s] has no governing Resource.',
+                    $joinKey
+                ));
+            }
 
             if (! isset($joins[$joinKey])) {
                 $relation = $this->belongsToRelation($parentModel, $relationship);
                 $alias = $this->alias('rel_'.$joinKey);
                 $relatedTable = $relation->getRelated()->getTable();
                 $ownerKey = $relation->getOwnerKeyName();
+                $relatedModelClass = $relation->getRelated()::class;
 
-                $query->leftJoin(
-                    $relatedTable.' as '.$alias,
+                if ($resourceClass::model() !== $relatedModelClass) {
+                    throw new InvalidArgumentException(sprintf(
+                        'Analytics relationship hop [%s] Resource [%s] must govern model [%s].',
+                        $joinKey,
+                        $resourceClass,
+                        $relatedModelClass
+                    ));
+                }
+
+                $relatedQuery = ResourceScopedQuery::make(
+                    $resourceClass,
+                    $relation->getRelated()->newQuery()
+                )
+                    ->withoutEagerLoads()
+                    ->select($relatedTable.'.*');
+
+                $query->leftJoinSub(
+                    $relatedQuery->toBase(),
+                    $alias,
                     $parentTable.'.'.$relation->getForeignKeyName(),
                     '=',
                     $alias.'.'.$ownerKey
@@ -344,9 +379,15 @@ final class AnalyticsCompiler
 
                 $joins[$joinKey] = [
                     'alias' => $alias,
-                    'model' => $relation->getRelated()::class,
+                    'model' => $relatedModelClass,
                     'owner_key' => $ownerKey,
+                    'resource_class' => $resourceClass,
                 ];
+            } elseif ($joins[$joinKey]['resource_class'] !== $resourceClass) {
+                throw new InvalidArgumentException(sprintf(
+                    'Analytics relationship hop [%s] is configured with conflicting governing Resources.',
+                    $joinKey
+                ));
             }
 
             $resolved = $joins[$joinKey];
@@ -373,7 +414,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      * @return array{0:string, 1:array<int, mixed>}
      */
     private function measureSql(Builder $query, AnalyticsDataset $dataset, Measure $measure, array &$joins): array
@@ -527,7 +568,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      */
     private function timeExpression(Builder $query, TimeDimension $dimension, string $grain, array &$joins): string
     {
@@ -569,7 +610,7 @@ final class AnalyticsCompiler
     }
 
     /**
-     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string}>  $joins
+     * @param  array<string, array{alias:string, model:class-string<Model>, owner_key:string, resource_class:string}>  $joins
      */
     private function timeFieldSql(Builder $query, TimeDimension $dimension, array &$joins): string
     {
@@ -578,7 +619,7 @@ final class AnalyticsCompiler
             return $this->qualifiedBaseColumn($query, $dimension->fieldName());
         }
 
-        $resolved = $this->ensureRelationshipPath($query, $path, $joins);
+        $resolved = $this->ensureRelationshipPath($query, $path, $dimension->relationshipResourceClasses(), $joins);
 
         return $resolved['alias'].'.'.$dimension->fieldName();
     }

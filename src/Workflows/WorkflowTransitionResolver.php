@@ -76,6 +76,49 @@ final class WorkflowTransitionResolver
     }
 
     /**
+     * Return visible and authorized transitions that are blocked by record conditions.
+     *
+     * @param  class-string<resource>  $resourceClass
+     * @return array<int, Transition>
+     */
+    public function blockedTransitions(string $resourceClass, Model $record, mixed $user = null): array
+    {
+        $workflow = $this->resolveWorkflow($resourceClass);
+        $currentState = $this->currentState($resourceClass, $record);
+
+        if ($currentState === null) {
+            return [];
+        }
+
+        $blocked = [];
+
+        foreach ($workflow->getTransitions() as $transition) {
+            if (! in_array($currentState, $transition->getFromStates(), true)) {
+                continue;
+            }
+
+            $context = new TransitionContext(
+                user: $user,
+                resourceClass: $resourceClass,
+                transition: $transition->name(),
+                fromState: $currentState,
+                toState: $transition->getToState(),
+                workflow: $workflow
+            );
+
+            if (! $transition->isVisibleFor($record, $user, $context)
+                || ! $transition->isAuthorizedFor($user, $record, $context)
+                || $transition->canRunFor($record, $user, $context)) {
+                continue;
+            }
+
+            $blocked[] = $transition;
+        }
+
+        return $blocked;
+    }
+
+    /**
      * @param  class-string<resource>  $resourceClass
      */
     public function canRun(string $resourceClass, Model $record, string $transitionName, mixed $user = null): bool

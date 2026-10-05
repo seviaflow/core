@@ -28,15 +28,16 @@ final class FormValidationRules
         ?string $modelClass = null,
         string $rootKey = 'fieldValues',
         array $fieldValues = [],
-        ?Model $record = null
+        ?Model $record = null,
+        ?FormState $state = null
     ): array {
         if ($context === ResourceContext::Show) {
             return [];
         }
 
         $rules = [];
-        foreach ($this->formFields->persistable($fields, $context) as $field) {
-            $fieldRules = $field->getRulesForContext($context, $record);
+        foreach ($this->formFields->persistable($fields, $context, $state) as $field) {
+            $fieldRules = $field->getRulesForState($context, $record, $state);
 
             if (! $this->containsRule($fieldRules, 'required') && ! $this->containsRule($fieldRules, 'nullable')) {
                 $fieldRules[] = 'nullable';
@@ -67,15 +68,19 @@ final class FormValidationRules
      * @param  non-empty-string  $rootKey
      * @return array<string, string>
      */
-    public function attributes(array $fields, ResourceContext $context, string $rootKey = 'fieldValues'): array
-    {
+    public function attributes(
+        array $fields,
+        ResourceContext $context,
+        string $rootKey = 'fieldValues',
+        ?FormState $state = null
+    ): array {
         if ($context === ResourceContext::Show) {
             return [];
         }
 
         $attributes = [];
 
-        foreach ($this->formFields->persistable($fields, $context) as $field) {
+        foreach ($this->formFields->persistable($fields, $context, $state) as $field) {
             $attributes[$rootKey.'.'.$field->name()] = strtolower($field->getLabel());
         }
 

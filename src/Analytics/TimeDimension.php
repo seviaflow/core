@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Analytics;
 
 use InvalidArgumentException;
+use SeviaFlow\Core\Resources\Resource;
 
 final class TimeDimension
 {
@@ -28,6 +29,9 @@ final class TimeDimension
      * @var array<int, string>
      */
     private array $relationshipPath = [];
+
+    /** @var array<int, string> */
+    private array $relationshipResources = [];
 
     /**
      * @var array<int, string>
@@ -111,8 +115,62 @@ final class TimeDimension
     public function relationshipPath(array $relationships): self
     {
         $this->relationshipPath = $this->normalizeRelationshipPath($relationships);
+        $this->relationshipResources = [];
 
         return $this;
+    }
+
+    /**
+     * Set the Resource classes that govern every hop in this relationship path.
+     *
+     * @param  array<int, mixed>  $resourceClasses
+     */
+    public function relationshipResources(array $resourceClasses): self
+    {
+        if ($this->relationshipPath === []) {
+            throw new InvalidArgumentException('Analytics relationship resources require relationshipPath() first.');
+        }
+
+        if (count($resourceClasses) !== count($this->relationshipPath)) {
+            throw new InvalidArgumentException(sprintf(
+                'Analytics relationship requires one Resource class per hop; expected %d, got %d.',
+                count($this->relationshipPath),
+                count($resourceClasses)
+            ));
+        }
+
+        $normalized = [];
+        foreach ($resourceClasses as $resourceClass) {
+            if (! is_string($resourceClass) || ! is_a($resourceClass, Resource::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Analytics relationship Resource [%s] must extend %s.',
+                    is_scalar($resourceClass) ? (string) $resourceClass : get_debug_type($resourceClass),
+                    Resource::class
+                ));
+            }
+
+            $normalized[] = $resourceClass;
+        }
+
+        $this->relationshipResources = $normalized;
+
+        return $this;
+    }
+
+    /**
+     * @param  class-string<resource>  $resourceClass
+     */
+    public function relationshipResource(string $resourceClass): self
+    {
+        return $this->relationshipResources([$resourceClass]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function relationshipResourceClasses(): array
+    {
+        return $this->relationshipResources;
     }
 
     /**
@@ -216,6 +274,7 @@ final class TimeDimension
             'aliases' => $this->aliases,
             'field' => $this->fieldName(),
             'relationship_path' => $this->relationshipPath,
+            'relationship_resources' => $this->relationshipResources,
             'grains' => $this->grains,
         ];
     }

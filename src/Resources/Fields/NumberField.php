@@ -13,7 +13,13 @@ class NumberField extends Field
 
     protected function defaultApiSchema(): array
     {
-        return ['type' => 'number', 'nullable' => true];
+        $schema = ['type' => 'number', 'nullable' => true];
+
+        if ($this->precision !== null) {
+            $schema['multipleOf'] = 1 / (10 ** $this->precision);
+        }
+
+        return $schema;
     }
 
     public function normalizeValue(mixed $value, ?Model $model = null): mixed
@@ -40,6 +46,10 @@ class NumberField extends Field
 
     private int|float|null $max = null;
 
+    private int|float|string|null $step = null;
+
+    private ?int $precision = null;
+
     public function min(int|float $value): static
     {
         $this->min = $value;
@@ -64,6 +74,42 @@ class NumberField extends Field
         return $this->max;
     }
 
+    public function step(int|float|string $value): static
+    {
+        if ((float) $value <= 0) {
+            throw new \InvalidArgumentException('NumberField step must be greater than zero.');
+        }
+
+        $this->step = $value;
+
+        return $this;
+    }
+
+    public function getStep(): int|float|string|null
+    {
+        if ($this->step !== null) {
+            return $this->step;
+        }
+
+        return $this->precision === null ? null : 1 / (10 ** $this->precision);
+    }
+
+    public function precision(int $precision): static
+    {
+        if ($precision < 0 || $precision > 8) {
+            throw new \InvalidArgumentException('NumberField precision must be between 0 and 8.');
+        }
+
+        $this->precision = $precision;
+
+        return $this;
+    }
+
+    public function getPrecision(): ?int
+    {
+        return $this->precision;
+    }
+
     public function defaultValidationRules(
         ResourceContext|string|null $context = null,
         mixed $record = null,
@@ -78,6 +124,10 @@ class NumberField extends Field
 
         if ($this->max !== null) {
             $rules[] = 'max:'.$this->max;
+        }
+
+        if ($this->precision !== null) {
+            $rules[] = 'decimal:0,'.$this->precision;
         }
 
         return $rules;

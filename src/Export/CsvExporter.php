@@ -13,9 +13,9 @@ final class CsvExporter
      * @param  array<int, string>  $headings
      * @param  array<int, array<int, mixed>>  $rows
      */
-    public function download(string $resourceSlug, array $headings, array $rows): StreamedResponse
+    public function download(string $resourceSlug, array $headings, array $rows, string $kind = 'export'): StreamedResponse
     {
-        $filename = $this->buildFilename($resourceSlug);
+        $filename = $this->buildFilename($resourceSlug, $kind);
 
         return response()->streamDownload(function () use ($headings, $rows): void {
             $stream = fopen('php://output', 'wb');
@@ -41,14 +41,19 @@ final class CsvExporter
         ]);
     }
 
-    private function buildFilename(string $resourceSlug): string
+    private function buildFilename(string $resourceSlug, string $kind): string
     {
         $base = Str::slug($resourceSlug, '-');
         if ($base === '') {
             $base = 'resource';
         }
 
-        return sprintf('%s-export-%s.csv', $base, now()->format('Ymd-His'));
+        $kind = Str::slug($kind, '-');
+        if ($kind === '') {
+            $kind = 'export';
+        }
+
+        return sprintf('%s-%s-%s.csv', $base, $kind, now()->format('Ymd-His'));
     }
 
     private function stringify(mixed $value): string

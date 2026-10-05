@@ -124,16 +124,17 @@ final class ResourceTableQuery
         return $query;
     }
 
-    public function paginate(int $perPage): LengthAwarePaginator|Paginator
+    public function paginate(int $perPage, ?int $page = null): LengthAwarePaginator|Paginator
     {
         $safePerPage = $this->resolvesPagination->normalizePerPage($perPage);
         $mode = (string) config('seviaflow.performance.pagination.mode', 'length_aware');
+        $safePage = $page === null ? null : max(1, $page);
 
         if ($mode === 'simple') {
-            return $this->query()->simplePaginate($safePerPage);
+            return $this->query()->simplePaginate($safePerPage, ['*'], 'page', $safePage);
         }
 
-        return $this->query()->paginate($safePerPage);
+        return $this->query()->paginate($safePerPage, ['*'], 'page', $safePage);
     }
 
     public function find(int|string $recordId): ?Model
@@ -198,7 +199,13 @@ final class ResourceTableQuery
 
     private function applySorting(Builder $query): void
     {
-        $this->appliesSorting->apply($query, $this->sortColumn, $this->sortDirection, $this->indexColumns());
+        $this->appliesSorting->apply(
+            $query,
+            $this->sortColumn,
+            $this->sortDirection,
+            $this->indexColumns(),
+            $this->primaryKeyName()
+        );
     }
 
     private function applyFilters(Builder $query): void

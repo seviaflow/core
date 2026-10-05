@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Auth;
 use InvalidArgumentException;
 use SeviaFlow\Core\Analytics\Exceptions\AnalyticsAuthorizationException;
 use SeviaFlow\Core\Analytics\Exceptions\AnalyticsQueryTooComplexException;
+use SeviaFlow\Core\Resources\Resource;
+use SeviaFlow\Core\Resources\ResourceAuthorization;
 
 final class AnalyticsExecutor
 {
@@ -109,6 +111,7 @@ final class AnalyticsExecutor
 
             foreach ($measure->filtersDefinition() as $filter) {
                 $this->assertFilterFieldIsRegistered($dataset, $filter);
+                $this->assertRelationshipAccessForFilter($dataset, $filter, $user);
             }
         }
 
@@ -119,7 +122,9 @@ final class AnalyticsExecutor
         }
 
         foreach ($dimensions as $dimensionKey) {
-            $this->assertRelationshipDepth($dataset->dimension($dimensionKey), 'dimension');
+            $dimension = $dataset->dimension($dimensionKey);
+            $this->assertRelationshipDepth($dimension, 'dimension');
+            $this->assertRelationshipResourceAccess($dimension, $user);
         }
 
         $time = $query->timeDefinition();
@@ -130,11 +135,13 @@ final class AnalyticsExecutor
             }
 
             $this->assertRelationshipDepth($timeDimension, 'time dimension');
+            $this->assertRelationshipResourceAccess($timeDimension, $user);
         }
 
         foreach ($query->filtersDefinition() as $filter) {
             $this->assertFilterFieldIsRegistered($dataset, $filter);
             $this->assertFilterRelationshipDepth($dataset, $filter);
+            $this->assertRelationshipAccessForFilter($dataset, $filter, $user);
         }
 
         $aggregateFilters = $query->aggregateFiltersDefinition();
@@ -238,6 +245,57 @@ final class AnalyticsExecutor
 
         if ($dataset->hasTimeDimension($filter->field())) {
             $this->assertRelationshipDepth($dataset->timeDimension($filter->field()), 'filter time dimension');
+        }
+    }
+
+    private function assertRelationshipAccessForFilter(
+        AnalyticsDataset $dataset,
+        AnalyticsFilter $filter,
+        ?Authenticatable $user
+    ): void {
+        if ($dataset->hasDimension($filter->field())) {
+            $this->assertRelationshipResourceAccess($dataset->dimension($filter->field()), $user);
+
+            return;
+        }
+
+        if ($dataset->hasTimeDimension($filter->field())) {
+            $this->assertRelationshipResourceAccess($dataset->timeDimension($filter->field()), $user);
+        }
+    }
+
+    private function assertRelationshipResourceAccess(
+        Dimension|TimeDimension $definition,
+        ?Authenticatable $user
+    ): void {
+        $path = $definition->relationshipPathDefinition();
+        if ($path === []) {
+            return;
+        }
+
+        $resourceClasses = $definition->relationshipResourceClasses();
+        if (count($resourceClasses) !== count($path)) {
+            throw new InvalidArgumentException(sprintf(
+                'Analytics relationship path [%s] must declare one governing Resource per hop.',
+                implode('.', $path)
+            ));
+        }
+
+        foreach ($resourceClasses as $resourceClass) {
+            if (! is_a($resourceClass, Resource::class, true)) {
+                throw new InvalidArgumentException(sprintf(
+                    'Analytics relationship Resource [%s] must extend %s.',
+                    $resourceClass,
+                    Resource::class
+                ));
+            }
+
+            if (! ResourceAuthorization::for($resourceClass)->canViewAny($user)) {
+                throw new AnalyticsAuthorizationException(sprintf(
+                    'Analytics relationship Resource [%s] is not authorized for the current user.',
+                    $resourceClass
+                ));
+            }
         }
     }
 

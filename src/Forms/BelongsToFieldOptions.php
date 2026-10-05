@@ -82,6 +82,14 @@ final class BelongsToFieldOptions
 
         $query = $field->applyResourceScope($query, $relation->getRelated());
 
+        $selectedRecord = null;
+        $selectedValue = $fieldValues[$field->name()] ?? null;
+        if (is_scalar($selectedValue) && (string) $selectedValue !== '') {
+            $selectedRecord = (clone $query)
+                ->where($ownerKey, $selectedValue)
+                ->first();
+        }
+
         $searchColumns = $field->getSearchableOptionColumns();
         if ($searchTerm !== '' && $searchColumns !== []) {
             $query->where(static function (Builder $searchQuery) use ($searchColumns, $searchTerm): void {
@@ -103,6 +111,11 @@ final class BelongsToFieldOptions
             ->get();
 
         $result = [];
+
+        if ($selectedRecord !== null) {
+            $value = (string) $selectedRecord->getAttribute($ownerKey);
+            $result[$value] = (string) $selectedRecord->getAttribute($titleAttribute);
+        }
 
         foreach ($records as $record) {
             $value = (string) $record->getAttribute($ownerKey);

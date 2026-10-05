@@ -14,6 +14,9 @@ Create application-level analytics definitions and register them in `AnalyticsRe
 namespace App\SeviaFlow\Analytics;
 
 use App\SeviaFlow\Resources\OrderItemResource\OrderItemResource;
+use App\SeviaFlow\Resources\OrderResource\OrderResource;
+use App\SeviaFlow\Resources\ProductResource\ProductResource;
+use App\SeviaFlow\Resources\CategoryResource\CategoryResource;
 use SeviaFlow\Core\Analytics\AnalyticsDataset;
 use SeviaFlow\Core\Analytics\AnalyticsAggregateFilter;
 use SeviaFlow\Core\Analytics\AnalyticsFilter;
@@ -49,18 +52,24 @@ final class StoreAnalytics
                     ->label('Product')
                     ->description('Product sold on the order item.')
                     ->aliases(['sku product'])
-                    ->relationship('product', 'name'),
+                    ->relationship('product', 'name')
+                    ->relationshipResource(ProductResource::class),
                 Dimension::make('category')
                     ->label('Category')
                     ->description('Product category reached through the governed product relation.')
                     ->aliases(['product category'])
-                    ->relationshipPath(['product', 'category'], 'id', 'name'),
+                    ->relationshipPath(['product', 'category'], 'id', 'name')
+                    ->relationshipResources([
+                        ProductResource::class,
+                        CategoryResource::class,
+                    ]),
                 Dimension::make('product_sku')
                     ->label('SKU')
                     ->relationshipField('product', 'sku'),
                 Dimension::make('order_status')
                     ->label('Order Status')
-                    ->relationshipField('order', 'status'),
+                    ->relationshipField('order', 'status')
+                    ->relationshipResource(OrderResource::class),
             ])
             ->timeDimensions([
                 TimeDimension::make('created_at')
@@ -71,6 +80,7 @@ final class StoreAnalytics
                     ->description('Ordered-at timestamp from the related order.')
                     ->aliases(['order date'])
                     ->relationshipPath(['order'])
+                    ->relationshipResource(OrderResource::class)
                     ->field('ordered_at'),
             ]);
     }
@@ -102,6 +112,47 @@ public function boot(): void
     }
 }
 ```
+
+## Governed Relationships
+
+Every relationship dimension or relationship time dimension must declare the
+Resource that governs each hop. The compiler uses that Resource query as a
+scoped subquery, so its query scope and active soft-delete scope apply before
+labels or values become analytics dimensions:
+
+```php
+Dimension::make('customer')
+    ->relationship('customer', 'name')
+    ->relationshipResource(CustomerResource::class);
+
+Dimension::make('category')
+    ->relationshipPath(['product', 'category'], 'id', 'name')
+    ->relationshipResources([
+        ProductResource::class,
+        CategoryResource::class,
+    ]);
+```
+
+The number and order of Resource classes must match the relationship path and
+each Resource must govern the related model for its hop. Analytics supports
+`BelongsTo` paths only; arbitrary relationship types and row-level policy
+predicates are not an analytics contract. Put visibility restrictions in the
+governing Resource `query()` scope and keep active records as the default.
+Missing or unauthorized governing Resources are rejected before execution.
+
+Time dimensions use the same contract:
+
+```php
+TimeDimension::make('order_ordered_at')
+    ->relationshipPath(['order'])
+    ->relationshipResource(OrderResource::class)
+    ->field('ordered_at');
+```
+
+Analytics date boundaries are half-open (`from` inclusive, `to` exclusive)
+and are compared in the database connection timezone. Normalize application
+or actor-local boundaries to that timezone before sending a query; no hidden
+timezone conversion is applied by the compiler.
 
 ## Measures
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Auth\User as AuthenticatableUser;
 use Illuminate\Support\Facades\Auth;
@@ -35,6 +36,7 @@ beforeEach(function (): void {
         $table->id();
         $table->string('name');
         $table->string('segment');
+        $table->softDeletes();
         $table->timestamps();
     });
 
@@ -314,6 +316,58 @@ it('groups by dimensions relationship dimensions and time grains with bounded li
         ->and($byMonth->rows()[1]['measures']['revenue'])->toBe(50.0);
 });
 
+it('requires governed relationship resources and applies their scope and soft deletes', function (): void {
+    $ungoverned = AnalyticsDataset::make('ungoverned-orders')
+        ->resource(AnalyticsOrderResource::class)
+        ->measures([Measure::make('orders')->count()])
+        ->dimensions([Dimension::make('customer')->relationship('customer', 'name')]);
+
+    $executor = new AnalyticsExecutor(new AnalyticsRegistry([$ungoverned]));
+
+    expect(fn () => $executor->execute(
+        AnalyticsQuery::make('ungoverned-orders')->measure('orders')->dimension('customer')
+    ))
+        ->toThrow(InvalidArgumentException::class, 'governing Resource');
+
+    $hidden = AnalyticsCustomerRecord::query()->create([
+        'name' => 'Secret Co',
+        'segment' => 'retail',
+    ]);
+    $hidden->delete();
+    AnalyticsOrderRecord::query()->create([
+        'owner_id' => AnalyticsUser::query()->where('name', 'Global')->value('id'),
+        'customer_id' => $hidden->getKey(),
+        'status' => 'completed',
+        'total' => 75,
+        'ordered_at' => '2026-04-01 10:00:00',
+    ]);
+
+    $scopedUser = AnalyticsUser::query()->where('name', 'Scoped')->firstOrFail();
+    $governedExecutor = new AnalyticsExecutor(new AnalyticsRegistry([analyticsOrdersDataset()]));
+    $scopedRows = $governedExecutor->execute(
+        AnalyticsQuery::make('orders')
+            ->measure('revenue')
+            ->dimension('customer')
+            ->orderBy('revenue', 'desc')
+            ->limit(10),
+        $scopedUser
+    )->rows();
+    $globalRows = $governedExecutor->execute(
+        AnalyticsQuery::make('orders')
+            ->measure('revenue')
+            ->dimension('customer')
+            ->orderBy('revenue', 'desc')
+            ->limit(10)
+    )->rows();
+
+    $scopedLabels = collect($scopedRows)->pluck('dimensions.customer.label')->all();
+    $globalLabels = collect($globalRows)->pluck('dimensions.customer.label')->all();
+
+    expect($scopedLabels)->toContain('Retail Co');
+    expect($scopedLabels)->not->toContain('Enterprise Co');
+    expect($globalLabels)->not->toContain('Secret Co');
+});
+
 it('executes every supported time grain', function (): void {
     $executor = new AnalyticsExecutor(new AnalyticsRegistry([analyticsOrdersDataset()]));
 
@@ -525,8 +579,8 @@ function analyticsOrdersDataset(): AnalyticsDataset
                     'draft' => 'Draft',
                     'shipped' => 'Shipped',
                 ]),
-            Dimension::make('customer')->relationship('customer', 'name'),
-            Dimension::make('customer_segment')->relationshipField('customer', 'segment'),
+            Dimension::make('customer')->relationship('customer', 'name')->relationshipResource(AnalyticsCustomerResource::class),
+            Dimension::make('customer_segment')->relationshipField('customer', 'segment')->relationshipResource(AnalyticsCustomerResource::class),
         ])
         ->timeDimensions([
             TimeDimension::make('ordered_at')->field('ordered_at'),
@@ -557,27 +611,32 @@ function analyticsOrderItemsDataset(): AnalyticsDataset
                 ->label('Product')
                 ->description('Product sold on the order line.')
                 ->aliases(['sku product'])
-                ->relationship('product', 'name'),
+                ->relationship('product', 'name')
+                ->relationshipResource(AnalyticsProductResource::class),
             Dimension::make('product_sku')
                 ->label('Product SKU')
                 ->description('Product stock keeping unit.')
                 ->aliases(['sku'])
-                ->relationshipField('product', 'sku'),
+                ->relationshipField('product', 'sku')
+                ->relationshipResource(AnalyticsProductResource::class),
             Dimension::make('category')
                 ->label('Category')
                 ->description('Product category reached through the product relationship.')
                 ->aliases(['category name'])
-                ->relationshipPath(['product', 'category'], 'id', 'name'),
+                ->relationshipPath(['product', 'category'], 'id', 'name')
+                ->relationshipResources([AnalyticsProductResource::class, AnalyticsCategoryResource::class]),
             Dimension::make('order_status')
                 ->label('Order status')
                 ->description('Status from the related order.')
                 ->aliases(['status'])
-                ->relationshipField('order', 'status'),
+                ->relationshipField('order', 'status')
+                ->relationshipResource(AnalyticsOrderResource::class),
             Dimension::make('customer')
                 ->label('Customer')
                 ->description('Customer reached through the related order.')
                 ->aliases(['buyer'])
-                ->relationshipPath(['order', 'customer'], 'id', 'name'),
+                ->relationshipPath(['order', 'customer'], 'id', 'name')
+                ->relationshipResources([AnalyticsOrderResource::class, AnalyticsCustomerResource::class]),
         ])
         ->timeDimensions([
             TimeDimension::make('created_at')
@@ -588,6 +647,7 @@ function analyticsOrderItemsDataset(): AnalyticsDataset
                 ->description('Ordered-at timestamp from the related order.')
                 ->aliases(['order date'])
                 ->relationshipPath(['order'])
+                ->relationshipResource(AnalyticsOrderResource::class)
                 ->field('ordered_at'),
         ]);
 }
@@ -601,9 +661,37 @@ final class AnalyticsUser extends AuthenticatableUser
 
 final class AnalyticsCustomerRecord extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'analytics_customers';
 
     protected $guarded = [];
+}
+
+final class AnalyticsCustomerResource extends Resource
+{
+    protected static string $model = AnalyticsCustomerRecord::class;
+
+    public static function query(Builder $query): Builder
+    {
+        $user = Auth::user();
+
+        if ($user instanceof AnalyticsUser && $user->getAttribute('name') === 'Scoped') {
+            return $query->where('segment', 'retail');
+        }
+
+        return $query;
+    }
+}
+
+final class AnalyticsCategoryResource extends Resource
+{
+    protected static string $model = AnalyticsCategoryRecord::class;
+}
+
+final class AnalyticsProductResource extends Resource
+{
+    protected static string $model = AnalyticsProductRecord::class;
 }
 
 final class AnalyticsCategoryRecord extends Model

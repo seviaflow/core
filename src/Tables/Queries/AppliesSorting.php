@@ -12,14 +12,27 @@ final class AppliesSorting
     /**
      * @param  array<int, Column>  $indexColumns
      */
-    public function apply(Builder $query, string $sortColumn, string $sortDirection, array $indexColumns): void
-    {
+    public function apply(
+        Builder $query,
+        string $sortColumn,
+        string $sortDirection,
+        array $indexColumns,
+        string $tieBreakerColumn = ''
+    ): void {
         if (! $this->isSortable($sortColumn, $indexColumns)) {
+            if ($tieBreakerColumn !== '') {
+                $query->orderBy($tieBreakerColumn, 'asc');
+            }
+
             return;
         }
 
         $direction = $sortDirection === 'desc' ? 'desc' : 'asc';
         $query->orderBy($sortColumn, $direction);
+
+        if ($tieBreakerColumn !== '' && $tieBreakerColumn !== $sortColumn) {
+            $query->orderBy($tieBreakerColumn, $direction);
+        }
     }
 
     /**

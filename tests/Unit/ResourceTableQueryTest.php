@@ -222,6 +222,28 @@ it('applies sorting only for sortable columns', function (): void {
     expect($unsorted)->toContain('Charlie')->toContain('Alice');
 });
 
+it('adds the model key as a stable pagination tie breaker', function (): void {
+    $first = ResourceTableQueryUser::query()->create([
+        'name' => 'Same',
+        'email' => 'first@example.com',
+        'status' => 'draft',
+        'is_active' => true,
+    ]);
+    $second = ResourceTableQueryUser::query()->create([
+        'name' => 'Same',
+        'email' => 'second@example.com',
+        'status' => 'draft',
+        'is_active' => true,
+    ]);
+
+    $query = ResourceTableQuery::make(ResourceTableQueryResource::class, ResourceTableQueryResource::table(new Table))
+        ->sort('name', 'asc')
+        ->query();
+
+    expect($query->pluck('id')->all())->toBe([$first->getKey(), $second->getKey()])
+        ->and(strtolower($query->toSql()))->toMatch('/order by.*name.*asc.*id.*asc/');
+});
+
 it('applies configured filters safely', function (): void {
     ResourceTableQueryUser::query()->create([
         'name' => 'Active Draft',
