@@ -101,6 +101,7 @@ final class RichTextSanitizer
             }
 
             if (! isset(self::ALLOWED_ELEMENTS[$tag])) {
+                $this->sanitizeChildren($child);
                 $this->unwrap($parent, $child);
 
                 continue;
@@ -150,6 +151,10 @@ final class RichTextSanitizer
         $scheme = strtolower((string) parse_url($href, PHP_URL_SCHEME));
         if ($scheme !== '') {
             return in_array($scheme, ['http', 'https', 'mailto'], true);
+        }
+
+        if (substr($href, 0, 2) === '//') {
+            return false;
         }
 
         return str_starts_with($href, '#')

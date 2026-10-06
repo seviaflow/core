@@ -4,12 +4,17 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -18,5 +23,5 @@ jobs:
           coverage: none
 
       - run: composer validate --strict
-      - run: composer update --no-interaction --prefer-dist
+      - run: composer install --no-interaction --prefer-dist --no-progress
       - run: composer check
