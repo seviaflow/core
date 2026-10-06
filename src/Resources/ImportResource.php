@@ -46,7 +46,7 @@ final class ImportResource
     }
 
     /**
-     * @param  array<int, string>  $fields
+     * @param  array<int, mixed>  $fields
      */
     public function allowedFields(array $fields): static
     {

@@ -8,7 +8,13 @@ parameters:
     - database
     - tests
   stubFiles:
-    - tests/PHPStan/Stubs/TestResponse.stub.php
     - tests/PHPStan/Stubs/Testable.stub.php
   level: 5
+  treatPhpDocTypesAsCertain: false
+  excludePaths:
+    - tests/PHPStan/Stubs/TestResponse.stub.php
+  ignoreErrors:
+    -
+      identifier: larastan.noEnvCallsOutsideOfConfig
+      path: config/seviaflow.php
   tmpDir: var/phpstan

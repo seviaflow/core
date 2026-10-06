@@ -18,9 +18,7 @@ final class Permission extends Model
 {
     protected $table = 'seviaflow_permissions';
 
-    /**
-     * @var array<int, string>
-     */
+    /** @var list<string> */
     protected $fillable = [
         'role_id',
         'resource',

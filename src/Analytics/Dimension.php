@@ -402,7 +402,7 @@ final class Dimension
             $path[] = $relationship;
         }
 
-        return array_values($path);
+        return $path;
     }
 
     private function normalizeNullableText(string $value): ?string

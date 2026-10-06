@@ -55,14 +55,14 @@ final class CsvImportExecutor
         }
 
         $headers = fgetcsv($stream);
-        if (! is_array($headers) || $headers === []) {
+        if ($headers === false) {
             fclose($stream);
 
             return $this->failure([], ['CSV headers are required.']);
         }
 
         $normalizedHeaders = array_values(array_map(
-            static fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '',
+            static fn (mixed $value): string => $value === null ? '' : trim((string) $value),
             $headers
         ));
 
@@ -98,10 +98,6 @@ final class CsvImportExecutor
 
         $rows = [];
         while (($line = fgetcsv($stream)) !== false) {
-            if (! is_array($line)) {
-                continue;
-            }
-
             $rows[] = $line;
             if (count($rows) > $maxRows) {
                 fclose($stream);
@@ -143,7 +139,7 @@ final class CsvImportExecutor
                 }
 
                 $value = $line[$columnIndex] ?? '';
-                $payload[$header] = is_scalar($value) ? trim((string) $value) : '';
+                $payload[$header] = trim((string) $value);
             }
 
             $payload = $this->operationService->prepareForImport($fields, $payload);

@@ -28,7 +28,7 @@ final class Table
     }
 
     /**
-     * @param  array<int, Column>  $columns
+     * @param  array<int, mixed>  $columns
      */
     public function columns(array $columns): self
     {
@@ -57,7 +57,7 @@ final class Table
     }
 
     /**
-     * @param  array<int, Filter>  $filters
+     * @param  array<int, mixed>  $filters
      */
     public function filters(array $filters): self
     {

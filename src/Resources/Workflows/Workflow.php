@@ -61,7 +61,7 @@ final class Workflow
     }
 
     /**
-     * @param  array<int, State>  $states
+     * @param  array<int, mixed>  $states
      */
     public function states(array $states): static
     {
@@ -90,7 +90,7 @@ final class Workflow
     }
 
     /**
-     * @param  array<int, Transition>  $transitions
+     * @param  array<int, mixed>  $transitions
      */
     public function transitions(array $transitions): static
     {

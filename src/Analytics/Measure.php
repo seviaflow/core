@@ -11,12 +11,12 @@ final class Measure
     /**
      * @var array<int, string>
      */
-    public const array AGGREGATIONS = ['count', 'sum', 'avg', 'min', 'max'];
+    public const AGGREGATIONS = ['count', 'sum', 'avg', 'min', 'max'];
 
     /**
      * @var array<int, string>
      */
-    public const array UNITS = ['number', 'integer', 'money', 'percent', 'duration', 'count'];
+    public const UNITS = ['number', 'integer', 'money', 'percent', 'duration', 'count'];
 
     /**
      * @var callable|null

@@ -32,7 +32,7 @@ it('stores workflow states', function (): void {
 });
 
 it('rejects invalid workflow states', function (): void {
-    /** @var array<int, State> $states */
+    /** @var array<int, mixed> $states */
     $states = [new stdClass];
 
     expect(fn () => (new Workflow)->states($states))
@@ -53,7 +53,7 @@ it('stores workflow transitions', function (): void {
 });
 
 it('rejects invalid workflow transitions', function (): void {
-    /** @var array<int, Transition> $transitions */
+    /** @var array<int, mixed> $transitions */
     $transitions = [new stdClass];
 
     expect(fn () => (new Workflow)->transitions($transitions))

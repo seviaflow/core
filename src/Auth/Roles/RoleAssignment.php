@@ -12,9 +12,7 @@ final class RoleAssignment extends Model
 {
     protected $table = 'seviaflow_roleables';
 
-    /**
-     * @var array<int, string>
-     */
+    /** @var list<string> */
     protected $fillable = [
         'role_id',
         'model_type',

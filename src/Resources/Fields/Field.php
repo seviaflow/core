@@ -162,11 +162,15 @@ abstract class Field
             return $this;
         }
 
-        if (! is_int($span) && (! is_string($span) || ! ctype_digit($span))) {
-            throw new \InvalidArgumentException('Field column span must be an integer or "full".');
-        }
+        if (is_int($span)) {
+            $normalized = $span;
+        } else {
+            if (! ctype_digit($span)) {
+                throw new \InvalidArgumentException('Field column span must be an integer or "full".');
+            }
 
-        $normalized = (int) $span;
+            $normalized = (int) $span;
+        }
         if ($normalized < 1 || $normalized > 12) {
             throw new \InvalidArgumentException('Field column span must be between 1 and 12.');
         }

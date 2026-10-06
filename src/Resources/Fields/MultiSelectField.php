@@ -102,7 +102,7 @@ final class MultiSelectField extends Field
             }
         }
 
-        return array_values($normalized);
+        return $normalized;
     }
 
     public function minSelected(int $min): static

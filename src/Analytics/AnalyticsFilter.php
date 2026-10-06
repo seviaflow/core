@@ -11,7 +11,7 @@ final class AnalyticsFilter
     /**
      * @var array<int, string>
      */
-    public const array OPERATORS = [
+    public const OPERATORS = [
         'equals',
         'not_equals',
         'in',

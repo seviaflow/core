@@ -27,7 +27,7 @@ final class Form
     private ?int $columns = null;
 
     /**
-     * @param  array<int, Field>  $fields
+     * @param  array<int, mixed>  $fields
      */
     public function fields(array $fields): self
     {
@@ -56,7 +56,7 @@ final class Form
     }
 
     /**
-     * @param  array<int, Section>  $sections
+     * @param  array<int, mixed>  $sections
      */
     public function sections(array $sections): self
     {

@@ -11,7 +11,7 @@ final class AnalyticsAggregateFilter
     /**
      * @var array<int, string>
      */
-    public const array OPERATORS = AnalyticsFilter::OPERATORS;
+    public const OPERATORS = AnalyticsFilter::OPERATORS;
 
     private function __construct(
         private readonly string $measure,

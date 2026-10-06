@@ -75,7 +75,7 @@ final class ApiResource
     }
 
     /**
-     * @param  array<int, string>  $fields
+     * @param  array<int, mixed>  $fields
      */
     public function readable(array $fields): static
     {

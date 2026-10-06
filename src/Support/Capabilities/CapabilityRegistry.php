@@ -26,6 +26,6 @@ final class CapabilityRegistry
 
     public function enabled(string $name): bool
     {
-        return ($this->capabilities[$name] ?? null)?->enabled ?? false;
+        return (bool) (($this->capabilities[$name] ?? null)?->enabled);
     }
 }

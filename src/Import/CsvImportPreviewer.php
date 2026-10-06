@@ -27,7 +27,7 @@ final class CsvImportPreviewer
         }
 
         $headers = fgetcsv($stream);
-        if (! is_array($headers) || $headers === []) {
+        if ($headers === false) {
             fclose($stream);
 
             return [
@@ -38,7 +38,7 @@ final class CsvImportPreviewer
         }
 
         $normalizedHeaders = array_values(array_map(
-            static fn (mixed $value): string => is_scalar($value) ? trim((string) $value) : '',
+            static fn (mixed $value): string => $value === null ? '' : trim((string) $value),
             $headers
         ));
 
@@ -68,10 +68,6 @@ final class CsvImportPreviewer
         $rowLimit = max(1, $rowLimit);
 
         while (($line = fgetcsv($stream)) !== false && count($rows) < $rowLimit) {
-            if (! is_array($line)) {
-                continue;
-            }
-
             $mapped = [];
             foreach ($normalizedHeaders as $index => $header) {
                 if ($header === '') {
@@ -79,7 +75,7 @@ final class CsvImportPreviewer
                 }
 
                 $value = $line[$index] ?? '';
-                $mapped[$header] = is_scalar($value) ? trim((string) $value) : '';
+                $mapped[$header] = trim((string) $value);
             }
 
             $rowErrors = [];

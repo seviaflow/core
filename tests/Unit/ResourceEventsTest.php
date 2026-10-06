@@ -65,14 +65,16 @@ it('fails clearly when event name is invalid in getters', function (): void {
 it('all v1 event methods exist and are callable', function (): void {
     $events = new ResourceEvents;
 
-    expect(method_exists($events, 'onCreating'))->toBeTrue()
-        ->and(method_exists($events, 'onCreated'))->toBeTrue()
-        ->and(method_exists($events, 'onUpdating'))->toBeTrue()
-        ->and(method_exists($events, 'onUpdated'))->toBeTrue()
-        ->and(method_exists($events, 'onDeleting'))->toBeTrue()
-        ->and(method_exists($events, 'onDeleted'))->toBeTrue()
-        ->and(method_exists($events, 'onRestoring'))->toBeTrue()
-        ->and(method_exists($events, 'onRestored'))->toBeTrue();
+    $reflection = new ReflectionClass($events);
+
+    expect($reflection->hasMethod('onCreating'))->toBeTrue()
+        ->and($reflection->hasMethod('onCreated'))->toBeTrue()
+        ->and($reflection->hasMethod('onUpdating'))->toBeTrue()
+        ->and($reflection->hasMethod('onUpdated'))->toBeTrue()
+        ->and($reflection->hasMethod('onDeleting'))->toBeTrue()
+        ->and($reflection->hasMethod('onDeleted'))->toBeTrue()
+        ->and($reflection->hasMethod('onRestoring'))->toBeTrue()
+        ->and($reflection->hasMethod('onRestored'))->toBeTrue();
 });
 
 final class ResourceEventsInvokableHandler

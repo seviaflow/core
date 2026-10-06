@@ -12,7 +12,7 @@ final class TimeDimension
     /**
      * @var array<int, string>
      */
-    public const array GRAINS = ['day', 'week', 'month', 'quarter', 'year'];
+    public const GRAINS = ['day', 'week', 'month', 'quarter', 'year'];
 
     private ?string $label = null;
 
@@ -320,7 +320,7 @@ final class TimeDimension
             $path[] = $relationship;
         }
 
-        return array_values($path);
+        return $path;
     }
 
     private function normalizeNullableText(string $value): ?string

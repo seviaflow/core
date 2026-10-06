@@ -85,7 +85,7 @@ final class Section
     }
 
     /**
-     * @param  array<int, Field>  $fields
+     * @param  array<int, mixed>  $fields
      */
     public function fields(array $fields): static
     {
@@ -119,11 +119,15 @@ final class Section
             return 12;
         }
 
-        if (! is_int($span) && (! is_string($span) || ! ctype_digit($span))) {
-            throw new InvalidArgumentException('Section column span must be an integer or "full".');
-        }
+        if (is_int($span)) {
+            $normalized = $span;
+        } else {
+            if (! ctype_digit($span)) {
+                throw new InvalidArgumentException('Section column span must be an integer or "full".');
+            }
 
-        $normalized = (int) $span;
+            $normalized = (int) $span;
+        }
         if ($normalized < 1 || $normalized > 12) {
             throw new InvalidArgumentException('Section column span must be between 1 and 12.');
         }

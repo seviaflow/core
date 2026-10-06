@@ -178,8 +178,13 @@ it('transition context contains user comment from and to states', function (): v
         confirmed: true
     );
 
-    /** @var TransitionContext $transitionContext */
-    $transitionContext = $capture->context;
+    $readContext = static fn (mixed $context): mixed => $context;
+    $capturedContext = $readContext($capture->context);
+    if (! $capturedContext instanceof TransitionContext) {
+        throw new RuntimeException('Workflow context was not captured.');
+    }
+
+    $transitionContext = $capturedContext;
 
     expect($transitionContext)->toBeInstanceOf(TransitionContext::class)
         ->and($transitionContext->user())->toBe($user)

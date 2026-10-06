@@ -49,7 +49,7 @@ final class ExportResource
     }
 
     /**
-     * @param  array<int, ExportField>  $fields
+     * @param  array<int, mixed>  $fields
      */
     public function allowedFields(array $fields): static
     {

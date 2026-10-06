@@ -18,9 +18,7 @@ final class Role extends Model
 {
     protected $table = 'seviaflow_roles';
 
-    /**
-     * @var array<int, string>
-     */
+    /** @var list<string> */
     protected $fillable = [
         'name',
         'slug',
