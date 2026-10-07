@@ -23,6 +23,7 @@ final class ResourceOperationContext
         private readonly ?string $connection = null,
         private readonly array $metadata = [],
         ?string $correlationId = null,
+        private readonly ?string $expectedRevision = null,
     ) {
         if (! in_array($this->source, ResourceEventContext::supportedSources(), true)) {
             throw new InvalidArgumentException(sprintf(
@@ -67,5 +68,12 @@ final class ResourceOperationContext
     public function correlationId(): string
     {
         return $this->correlationId;
+    }
+
+    public function expectedRevision(): ?string
+    {
+        $revision = $this->expectedRevision === null ? null : trim($this->expectedRevision);
+
+        return $revision === '' ? null : $revision;
     }
 }

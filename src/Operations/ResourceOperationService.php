@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Operations;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use SeviaFlow\Core\Exceptions\ResourceOperationAuthorizationException;
+use SeviaFlow\Core\Exceptions\ResourceOperationConflictException;
 use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Forms\FieldValueNormalizer;
 use SeviaFlow\Core\Forms\FormFields;
@@ -16,10 +19,12 @@ use SeviaFlow\Core\Resources\Fields\FileField;
 use SeviaFlow\Core\Resources\Fields\PasswordField;
 use SeviaFlow\Core\Resources\Form;
 use SeviaFlow\Core\Resources\Resource;
+use SeviaFlow\Core\Resources\ResourceAuthorization;
 use SeviaFlow\Core\Resources\ResourceContext;
 use SeviaFlow\Core\Resources\ResourceEventContext;
 use SeviaFlow\Core\Resources\ResourceEventDispatcher;
 use SeviaFlow\Core\Resources\ResourceRegistry;
+use SeviaFlow\Core\Resources\ResourceScopedQuery;
 use SeviaFlow\Core\Workflows\WorkflowStateFieldGuard;
 use Throwable;
 
@@ -43,23 +48,28 @@ final class ResourceOperationService
         ResourceContext $context,
         ?string $resourceClass = null,
         ?FormState $state = null,
+        ?string $expectedRevision = null,
     ): Model {
         $fileLifecycle = new FileLifecycleManager($fields);
         $resolvedResourceClass = $this->resolveResourceClass($model, $resourceClass);
         $fileLifecycle->registerRollbackCallback($model);
 
         try {
-            return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass, $state): Model {
+            return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass, $state, $expectedRevision): Model {
+                $operationModel = $context === ResourceContext::Edit && $resolvedResourceClass !== null
+                    ? $this->lockForOperation($resolvedResourceClass, $model, null, $expectedRevision)
+                    : $model;
+
                 if ($resolvedResourceClass !== null) {
                     $this->workflowStateFieldGuard->ensurePayloadDoesNotWriteStateField($resolvedResourceClass, $values);
-                    $this->workflowStateFieldGuard->initialize($resolvedResourceClass, $model, $context);
+                    $this->workflowStateFieldGuard->initialize($resolvedResourceClass, $operationModel, $context);
                 }
 
-                $this->applyValues($model, $fields, $values, $context, $fileLifecycle, $state);
-                $model->save();
-                $fileLifecycle->finalize($model);
+                $this->applyValues($operationModel, $fields, $values, $context, $fileLifecycle, $state);
+                $operationModel->save();
+                $fileLifecycle->finalize($operationModel);
 
-                return $model;
+                return $operationModel;
             });
         } catch (Throwable $exception) {
             $fileLifecycle->rollback();
@@ -101,13 +111,16 @@ final class ResourceOperationService
                 $fileLifecycle,
                 $state,
             ): Model {
-                $isCreate = ! $model->exists;
-                $original = is_array($model->getOriginal()) ? $model->getOriginal() : [];
+                $operationModel = $context === ResourceContext::Edit
+                    ? $this->lockForOperation($resourceClass, $model, $operationContext->actor(), $operationContext->expectedRevision())
+                    : $model;
+                $isCreate = ! $operationModel->exists;
+                $original = is_array($operationModel->getOriginal()) ? $operationModel->getOriginal() : [];
                 $this->workflowStateFieldGuard->ensurePayloadDoesNotWriteStateField($resourceClass, $values);
-                $changes = $this->workflowStateFieldGuard->initialize($resourceClass, $model, $context);
+                $changes = $this->workflowStateFieldGuard->initialize($resourceClass, $operationModel, $context);
                 $changes = array_merge(
                     $changes,
-                    $this->applyValues($model, $fields, $values, $context, $fileLifecycle, $state)
+                    $this->applyValues($operationModel, $fields, $values, $context, $fileLifecycle, $state)
                 );
                 $beforeEvent = $isCreate
                     ? ResourceEventContext::OPERATION_CREATING
@@ -120,7 +133,7 @@ final class ResourceOperationService
                     resourceClass: $resourceClass,
                     resourceSlug: $resourceSlug,
                     event: $beforeEvent,
-                    model: $model,
+                    model: $operationModel,
                     original: $original,
                     changes: $changes,
                     operationContext: $operationContext,
@@ -128,21 +141,21 @@ final class ResourceOperationService
                 );
 
                 if ($save !== null) {
-                    $save($model);
+                    $save($operationModel);
                 } else {
-                    $model->save();
+                    $operationModel->save();
                 }
 
-                $fileLifecycle->finalize($model);
+                $fileLifecycle->finalize($operationModel);
                 $this->resourceEventDispatcher->dispatchAfterCommit(
                     resourceClass: $resourceClass,
                     event: $afterEvent,
-                    record: $model,
+                    record: $operationModel,
                     context: $this->eventContext(
                         resourceClass: $resourceClass,
                         resourceSlug: $resourceSlug,
                         event: $afterEvent,
-                        model: $model,
+                        model: $operationModel,
                         original: $original,
                         changes: $changes,
                         operationContext: $operationContext,
@@ -150,7 +163,7 @@ final class ResourceOperationService
                     ),
                 );
 
-                return $model;
+                return $operationModel;
             });
         } catch (Throwable $exception) {
             $fileLifecycle->rollback();
@@ -310,6 +323,38 @@ final class ResourceOperationService
     private function transaction(Model $model, Closure $callback): Model
     {
         return $model->getConnection()->transaction($callback);
+    }
+
+    /**
+     * @param  class-string<resource>  $resourceClass
+     */
+    private function lockForOperation(
+        string $resourceClass,
+        Model $model,
+        mixed $actor,
+        ?string $expectedRevision,
+    ): Model {
+        $locked = ResourceScopedQuery::make($resourceClass, $model->newQuery())
+            ->whereKey($model->getKey())
+            ->lockForUpdate()
+            ->first();
+
+        if (! $locked instanceof Model) {
+            throw ResourceOperationConflictException::unavailable();
+        }
+
+        if ($actor === null || $actor instanceof Authenticatable) {
+            $authorized = ResourceAuthorization::for($resourceClass)->canUpdate($actor, $locked);
+            if (! $authorized) {
+                throw new ResourceOperationAuthorizationException;
+            }
+        }
+
+        if ($expectedRevision !== null && ResourceRevision::for($locked) !== $expectedRevision) {
+            throw ResourceOperationConflictException::staleRevision();
+        }
+
+        return $locked;
     }
 
     /**

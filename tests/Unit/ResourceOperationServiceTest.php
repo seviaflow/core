@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
+use SeviaFlow\Core\Exceptions\ResourceOperationConflictException;
 use SeviaFlow\Core\Operations\ResourceOperationContext;
 use SeviaFlow\Core\Operations\ResourceOperationService;
+use SeviaFlow\Core\Operations\ResourceRevision;
+use SeviaFlow\Core\Resources\Fields\FileField;
 use SeviaFlow\Core\Resources\Fields\MoneyField;
 use SeviaFlow\Core\Resources\Fields\MultiSelectField;
 use SeviaFlow\Core\Resources\Fields\PasswordField;
@@ -28,6 +33,7 @@ beforeEach(function (): void {
         $table->string('database_default')->nullable()->default('database-default');
         $table->json('tags')->nullable();
         $table->string('password')->nullable();
+        $table->string('document_path')->nullable();
         $table->timestamps();
     });
 
@@ -136,6 +142,52 @@ it('keeps an explicitly empty imported column distinct from an omitted column', 
     $record->save();
 
     expect($record->fresh()?->getAttribute('database_default'))->toBeNull();
+});
+
+it('rejects a stale revision before callbacks and file side effects', function (): void {
+    Storage::fake('public');
+    $record = ResourceOperationServiceRecord::query()->create(['name' => 'Before conflict']);
+    $expectedRevision = ResourceRevision::for($record);
+
+    ResourceOperationServiceRecord::query()->whereKey($record->getKey())->update(['name' => 'Changed elsewhere']);
+    ResourceOperationServiceCapture::$events = [];
+
+    expect(fn () => (new ResourceOperationService)->execute(
+        resourceClass: ResourceOperationServiceResource::class,
+        resourceSlug: 'operation-service-records',
+        model: $record,
+        fields: ResourceOperationServiceResource::form(new Form)->getAllFields(),
+        values: [
+            'name' => 'Stale write',
+            'document_path' => UploadedFile::fake()->create('stale.pdf', 10, 'application/pdf'),
+        ],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(expectedRevision: $expectedRevision),
+    ))->toThrow(ResourceOperationConflictException::class);
+
+    expect(ResourceOperationServiceRecord::query()->whereKey($record->getKey())->firstOrFail()->getAttribute('name'))->toBe('Changed elsewhere')
+        ->and(ResourceOperationServiceCapture::$events)->toBe([])
+        ->and(Storage::disk('public')->files())->toBe([]);
+});
+
+it('rejects an edit when the scoped record was deleted after it was read', function (): void {
+    $record = ResourceOperationServiceRecord::query()->create(['name' => 'Deleted elsewhere']);
+    $expectedRevision = ResourceRevision::for($record);
+    ResourceOperationServiceRecord::query()->whereKey($record->getKey())->delete();
+    ResourceOperationServiceCapture::$events = [];
+
+    expect(fn () => (new ResourceOperationService)->execute(
+        resourceClass: ResourceOperationServiceResource::class,
+        resourceSlug: 'operation-service-records',
+        model: $record,
+        fields: ResourceOperationServiceResource::form(new Form)->getAllFields(),
+        values: ['name' => 'Should not save'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(expectedRevision: $expectedRevision),
+    ))->toThrow(ResourceOperationConflictException::class);
+
+    expect(ResourceOperationServiceRecord::query()->whereKey($record->getKey())->exists())->toBeFalse()
+        ->and(ResourceOperationServiceCapture::$events)->toBe([]);
 });
 
 it('dispatches before save and after commit with actor source connection and safe changes', function (): void {
@@ -253,6 +305,7 @@ final class ResourceOperationServiceResource extends Resource
             MoneyField::make('amount'),
             MultiSelectField::make('tags')->options(['email' => 'Email', 'sms' => 'SMS']),
             PasswordField::make('password'),
+            FileField::make('document_path'),
         ]);
     }
 
@@ -283,6 +336,18 @@ final class ResourceOperationServiceResource extends Resource
                     'correlation_id' => $context->correlationId(),
                     'changes' => $context->changes(),
                     'result' => $context->metadata()['result'] ?? null,
+                ];
+            })
+            ->onUpdating(static function (Model $record, ResourceEventContext $context): void {
+                ResourceOperationServiceCapture::$events[] = [
+                    'event' => 'updating',
+                    'name' => $record->getAttribute('name'),
+                ];
+            })
+            ->onUpdated(static function (Model $record, ResourceEventContext $context): void {
+                ResourceOperationServiceCapture::$events[] = [
+                    'event' => 'updated',
+                    'name' => $record->getAttribute('name'),
                 ];
             });
     }

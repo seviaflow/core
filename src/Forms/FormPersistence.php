@@ -63,7 +63,8 @@ final class FormPersistence
         ResourceContext $context,
         mixed $user = null,
         ?Request $request = null,
-        ?FormState $state = null
+        ?FormState $state = null,
+        ?string $expectedRevision = null,
     ): Model {
         return $this->operationService->execute(
             resourceClass: $resourceClass,
@@ -76,6 +77,7 @@ final class FormPersistence
                 actor: $user,
                 source: ResourceEventContext::SOURCE_FORM,
                 request: $request,
+                expectedRevision: $expectedRevision,
             ),
             state: $state,
         );
