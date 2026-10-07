@@ -131,6 +131,28 @@ final class FormStateInitializer
     }
 
     /**
+     * Return the fields that are intentionally present in the initial form state.
+     *
+     * Empty UI placeholders are not persistence intent. Existing records expose
+     * their current fields, while create forms only expose explicit field defaults.
+     *
+     * @param  array<int, Field>  $fields
+     * @return array<string, bool>
+     */
+    public function initialPresence(array $fields, ?Model $record): array
+    {
+        $presence = [];
+
+        foreach ($fields as $field) {
+            if ($record !== null || $field->hasDefault()) {
+                $presence[$field->name()] = true;
+            }
+        }
+
+        return $presence;
+    }
+
+    /**
      * @param  array<int, Field>  $fields
      */
     private function assertNoDependencyCycles(array $fields): void

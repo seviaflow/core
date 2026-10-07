@@ -39,10 +39,13 @@ it('initializes defaults and evaluates conditional state from current values', f
         ->requiredWhen('type', static fn (FormState $state): bool => $state->value('type') === 'company')
         ->hiddenWhen('type', static fn (FormState $state): bool => $state->value('type') === 'person');
     $fields = [$type, $taxId];
-    $values = (new FormStateInitializer)->initialize($fields, null);
+    $initializer = new FormStateInitializer;
+    $values = $initializer->initialize($fields, null);
+    $presence = $initializer->initialPresence($fields, null);
     $state = new FormState($values, ResourceContext::Create);
 
     expect($values['type'])->toBe('company')
+        ->and($presence)->toBe(['type' => true])
         ->and($taxId->isRequiredForState(ResourceContext::Create, $state))->toBeTrue()
         ->and($taxId->isVisibleForState(ResourceContext::Create, $state))->toBeTrue()
         ->and((new FormValidationRules)->build($fields, ResourceContext::Create, null, 'fieldValues', $values, null, $state)['fieldValues.tax_id'])

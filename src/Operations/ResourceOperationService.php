@@ -185,10 +185,6 @@ final class ResourceOperationService
             }
 
             if (isset($fieldMap[$name])) {
-                if (! $model->exists && ($value === null || $value === '')) {
-                    continue;
-                }
-
                 if (
                     $fieldMap[$name] instanceof PasswordField
                     && $fieldMap[$name]->shouldDehydrateOnlyWhenFilled()

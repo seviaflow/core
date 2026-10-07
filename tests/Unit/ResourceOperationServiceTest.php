@@ -25,6 +25,7 @@ beforeEach(function (): void {
         $table->string('name');
         $table->boolean('is_active')->default(false);
         $table->decimal('amount', 10, 2)->nullable();
+        $table->string('database_default')->nullable()->default('database-default');
         $table->json('tags')->nullable();
         $table->string('password')->nullable();
         $table->timestamps();
@@ -86,19 +87,55 @@ it('uses the host hashed cast exactly once', function (): void {
     expect(Hash::check('cast-secret', (string) $model->fresh()?->getAttribute('password')))->toBeTrue();
 });
 
-it('leaves empty create values to database defaults', function (): void {
-    $model = new ResourceOperationServiceRecord;
+it('distinguishes omitted values from explicit null and preserves false and zero', function (): void {
+    $service = new ResourceOperationService;
+    $fields = [
+        TextField::make('name'),
+        TextField::make('database_default'),
+        ToggleField::make('is_active'),
+        MoneyField::make('amount'),
+    ];
 
-    (new ResourceOperationService)->applyValues(
-        $model,
-        [TextField::make('name'), ToggleField::make('is_active'), MoneyField::make('amount')],
-        ['name' => 'Defaults', 'is_active' => null, 'amount' => null],
+    $omitted = new ResourceOperationServiceRecord;
+    $service->applyValues($omitted, $fields, ['name' => 'Defaults'], ResourceContext::Create);
+    $omitted->save();
+
+    $cleared = new ResourceOperationServiceRecord;
+    $service->applyValues(
+        $cleared,
+        $fields,
+        ['name' => 'Explicit null', 'database_default' => null, 'is_active' => false, 'amount' => '0'],
         ResourceContext::Create
     );
-    $model->save();
+    $cleared->save();
 
-    expect($model->fresh()?->getAttribute('is_active'))->toBeFalse()
-        ->and($model->fresh()?->getAttribute('amount'))->toBeNull();
+    $updated = ResourceOperationServiceRecord::query()->create([
+        'name' => 'Before update',
+        'database_default' => 'keep-me',
+    ]);
+    $service->applyValues($updated, $fields, ['name' => 'After update'], ResourceContext::Edit);
+    $updated->save();
+
+    expect($omitted->fresh()?->getAttribute('database_default'))->toBe('database-default')
+        ->and($cleared->fresh()?->getAttribute('database_default'))->toBeNull()
+        ->and($cleared->fresh()?->getAttribute('is_active'))->toBeFalse()
+        ->and($cleared->fresh()?->getAttribute('amount'))->toBe('0.00')
+        ->and($updated->fresh()?->getAttribute('database_default'))->toBe('keep-me');
+});
+
+it('keeps an explicitly empty imported column distinct from an omitted column', function (): void {
+    $service = new ResourceOperationService;
+    $fields = [TextField::make('name'), TextField::make('database_default')];
+    $prepared = $service->prepareForImport($fields, ['name' => 'Imported', 'database_default' => '']);
+
+    expect(array_key_exists('database_default', $prepared))->toBeTrue()
+        ->and($prepared['database_default'])->toBe('');
+
+    $record = new ResourceOperationServiceRecord;
+    $service->applyValues($record, $fields, $prepared, ResourceContext::Create);
+    $record->save();
+
+    expect($record->fresh()?->getAttribute('database_default'))->toBeNull();
 });
 
 it('dispatches before save and after commit with actor source connection and safe changes', function (): void {
@@ -145,6 +182,7 @@ it('uses the model connection for transactions and lifecycle events', function (
         $table->string('name');
         $table->boolean('is_active')->default(false);
         $table->decimal('amount', 10, 2)->nullable();
+        $table->string('database_default')->nullable()->default('database-default');
         $table->json('tags')->nullable();
         $table->string('password')->nullable();
         $table->timestamps();
@@ -196,6 +234,7 @@ final class ResourceOperationServiceRecord extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'amount' => 'decimal:2',
+        'database_default' => 'string',
         'tags' => 'array',
         'password' => 'hashed',
     ];
@@ -209,6 +248,7 @@ final class ResourceOperationServiceResource extends Resource
     {
         return $form->fields([
             TextField::make('name'),
+            TextField::make('database_default'),
             ToggleField::make('is_active'),
             MoneyField::make('amount'),
             MultiSelectField::make('tags')->options(['email' => 'Email', 'sms' => 'SMS']),
