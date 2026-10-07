@@ -3,11 +3,14 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Mockery\MockInterface;
 use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Files\FileMutation;
 use SeviaFlow\Core\Operations\ResourceOperationContext;
@@ -23,6 +26,9 @@ beforeEach(function (): void {
         $table->id();
         $table->string('name');
         $table->string('document_path')->nullable();
+        $table->string('thumbnail_path')->nullable();
+        $table->string('archive_path')->nullable();
+        $table->softDeletes();
         $table->timestamps();
     });
 });
@@ -143,6 +149,154 @@ it('does not remove a shared file until the last reference is removed', function
     Storage::disk('public')->assertMissing('documents/shared.pdf');
 });
 
+it('keeps a file referenced by another file field on the same record', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('documents/same-record.pdf', 'shared');
+    $record = FileLifecycleRecord::query()->create([
+        'name' => 'Same record',
+        'document_path' => 'documents/same-record.pdf',
+        'thumbnail_path' => 'documents/same-record.pdf',
+    ]);
+    $fields = FileLifecycleResource::form(new Form)->getAllFields();
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $record,
+        fields: $fields,
+        values: ['document_path' => UploadedFile::fake()->create('replacement.pdf', 10, 'application/pdf')],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'form'),
+    );
+
+    Storage::disk('public')->assertExists('documents/same-record.pdf');
+    $record->refresh();
+    Storage::disk('public')->assertExists($record->document_path);
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $record->fresh(),
+        fields: $fields,
+        values: ['thumbnail_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'form'),
+    );
+
+    Storage::disk('public')->assertMissing('documents/same-record.pdf');
+});
+
+it('does not treat the same path on another disk as a reference', function (): void {
+    Storage::fake('public');
+    Storage::fake('local');
+    Storage::disk('public')->put('documents/same-name.pdf', 'public');
+    Storage::disk('local')->put('documents/same-name.pdf', 'local');
+    $record = FileLifecycleRecord::query()->create([
+        'name' => 'Different disks',
+        'document_path' => 'documents/same-name.pdf',
+        'archive_path' => 'documents/same-name.pdf',
+    ]);
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $record,
+        fields: FileLifecycleResource::form(new Form)->getAllFields(),
+        values: ['document_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'form'),
+    );
+
+    Storage::disk('public')->assertMissing('documents/same-name.pdf');
+    Storage::disk('local')->assertExists('documents/same-name.pdf');
+});
+
+it('keeps files referenced by soft-deleted records until the last reference is removed', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('documents/trashed.pdf', 'shared');
+    $active = FileLifecycleRecord::query()->create([
+        'name' => 'Active',
+        'document_path' => 'documents/trashed.pdf',
+    ]);
+    $trashed = FileLifecycleRecord::query()->create([
+        'name' => 'Trashed',
+        'document_path' => 'documents/trashed.pdf',
+    ]);
+    $trashed->delete();
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $active,
+        fields: FileLifecycleResource::form(new Form)->getAllFields(),
+        values: ['document_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'form'),
+    );
+
+    Storage::disk('public')->assertExists('documents/trashed.pdf');
+
+    $trashed->restore();
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $trashed->fresh(),
+        fields: FileLifecycleResource::form(new Form)->getAllFields(),
+        values: ['document_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'form'),
+    );
+
+    Storage::disk('public')->assertMissing('documents/trashed.pdf');
+});
+
+it('cleans new files when an enclosing transaction rolls back without manual cleanup', function (): void {
+    Storage::fake('public');
+    $fileLifecycle = new FileLifecycleManager(FileLifecycleResource::form(new Form)->getAllFields());
+
+    expect(fn () => DB::transaction(function () use ($fileLifecycle): void {
+        (new ResourceOperationService)->execute(
+            resourceClass: FileLifecycleResource::class,
+            resourceSlug: 'file-lifecycle',
+            model: new FileLifecycleRecord,
+            fields: FileLifecycleResource::form(new Form)->getAllFields(),
+            values: [
+                'name' => 'Outer rollback',
+                'document_path' => UploadedFile::fake()->create('outer.pdf', 10, 'application/pdf'),
+            ],
+            context: ResourceContext::Create,
+            operationContext: new ResourceOperationContext(source: 'form'),
+            fileLifecycle: $fileLifecycle,
+        );
+
+        throw new RuntimeException('outer transaction failed');
+    }))->toThrow(RuntimeException::class, 'outer transaction failed');
+
+    expect(Storage::disk('public')->files('documents'))->toBe([]);
+});
+
+it('keeps a file and logs a safe diagnostic when reference lookup fails', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('documents/unknown-reference.pdf', 'keep');
+    /** @var MockInterface $logger */
+    $logger = Log::spy();
+    $field = FileField::make('document_path')->disk('public')->directory('documents');
+    $record = new BrokenFileLifecycleRecord;
+    $record->forceFill(['id' => 1, 'document_path' => 'documents/unknown-reference.pdf']);
+    $record->syncOriginal();
+    $manager = new FileLifecycleManager([$field]);
+
+    $manager->apply($record, $field, 'remove');
+    $manager->finalize($record);
+
+    Storage::disk('public')->assertExists('documents/unknown-reference.pdf');
+    $logger->shouldHaveReceived('warning')->withArgs(
+        static fn (string $message, array $context): bool => $message === 'File reference lookup failed; preserving file.'
+            && $context['model'] === BrokenFileLifecycleRecord::class
+            && $context['field'] === 'document_path'
+    )->once();
+});
+
 it('can retry removal without failing after the file is gone', function (): void {
     Storage::fake('public');
     Storage::disk('public')->put('documents/removable.pdf', 'file');
@@ -205,6 +359,8 @@ it('requires an authorization callback for private file reads', function (): voi
  */
 final class FileLifecycleRecord extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'file_lifecycle_records';
 
     protected $guarded = [];
@@ -222,6 +378,19 @@ final class FileLifecycleResource extends Resource
                 ->disk('public')
                 ->directory('documents')
                 ->acceptedFileTypes(['application/pdf']),
+            FileField::make('thumbnail_path')
+                ->disk('public')
+                ->directory('documents'),
+            FileField::make('archive_path')
+                ->disk('local')
+                ->directory('documents'),
         ]);
     }
+}
+
+final class BrokenFileLifecycleRecord extends Model
+{
+    protected $table = 'missing_file_lifecycle_records';
+
+    protected $guarded = [];
 }

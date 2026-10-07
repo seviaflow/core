@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Files;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use SeviaFlow\Core\Resources\Fields\Field;
 use SeviaFlow\Core\Resources\Fields\FileField;
@@ -26,6 +29,10 @@ final class FileLifecycleManager
     private bool $finalized = false;
 
     private bool $cleanupScheduled = false;
+
+    private bool $rolledBack = false;
+
+    private bool $rollbackCallbackRegistered = false;
 
     /**
      * @param  array<int, Field>  $fields
@@ -87,15 +94,25 @@ final class FileLifecycleManager
 
         $this->cleanupScheduled = true;
         $cleanup = function (): void {
+            if ($this->rolledBack) {
+                return;
+            }
+
             $this->finalized = true;
 
             foreach ($this->oldFiles as $oldFile) {
-                $this->deleteOldFile($oldFile['model'], $oldFile['field'], $oldFile['path'], $oldFile['replacement']);
+                $this->deleteOldFile(
+                    $oldFile['model'],
+                    $oldFile['field'],
+                    $oldFile['path'],
+                    $oldFile['replacement']
+                );
             }
         };
 
         if ($model->getConnection()->transactionLevel() > 0) {
             $model->getConnection()->afterCommit($cleanup);
+            $this->registerRollbackCallback($model);
 
             return;
         }
@@ -103,40 +120,92 @@ final class FileLifecycleManager
         $cleanup();
     }
 
-    public function rollback(): void
+    public function registerRollbackCallback(Model $model): void
     {
-        if ($this->finalized) {
+        if (
+            $this->rollbackCallbackRegistered
+            || $this->finalized
+            || $this->rolledBack
+            || $model->getConnection()->transactionLevel() === 0
+        ) {
             return;
         }
 
+        if (method_exists($model->getConnection(), 'afterRollBack')) {
+            $model->getConnection()->afterRollBack(function (): void {
+                $this->rollback();
+            });
+            $this->rollbackCallbackRegistered = true;
+
+            return;
+        }
+
+        Log::warning('File lifecycle rollback callback is unavailable; preserving new files.', [
+            'model' => $model::class,
+        ]);
+    }
+
+    public function rollback(): void
+    {
+        if ($this->finalized || $this->rolledBack) {
+            return;
+        }
+
+        $this->rolledBack = true;
+
         foreach ($this->newFiles as $newFile) {
             try {
-                Storage::disk($newFile['disk'])->delete($newFile['path']);
-            } catch (Throwable) {
+                if (! Storage::disk($newFile['disk'])->delete($newFile['path'])) {
+                    $this->logCleanupFailure('File rollback cleanup failed; preserving new file.', $newFile['disk']);
+                }
+            } catch (Throwable $exception) {
+                $this->logCleanupFailure(
+                    'File rollback cleanup failed; preserving new file.',
+                    $newFile['disk'],
+                    $exception
+                );
             }
         }
 
         $this->newFiles = [];
+        $this->oldFiles = [];
     }
 
     private function deleteOldFile(Model $model, FileField $field, string $path, ?string $replacement): void
     {
-        if ($path === $replacement || ! FilePathGuard::isManaged($field, $path) || $this->isReferencedByAnotherRecord($model, $path)) {
+        if (
+            $path === $replacement
+            || ! FilePathGuard::isManaged($field, $path)
+            || $this->isReferenced($model, $field, $path)
+        ) {
             return;
         }
 
         try {
-            Storage::disk($field->getDisk())->delete($path);
-        } catch (Throwable) {
+            if (! Storage::disk($field->getDisk())->delete($path)) {
+                $this->logCleanupFailure('File cleanup failed; preserving managed file.', $field->getDisk());
+            }
+        } catch (Throwable $exception) {
+            $this->logCleanupFailure(
+                'File cleanup failed; preserving managed file.',
+                $field->getDisk(),
+                $exception
+            );
         }
     }
 
-    private function isReferencedByAnotherRecord(Model $model, string $path): bool
+    private function isReferenced(Model $model, FileField $sourceField, string $path): bool
     {
-        $fileFields = array_values(array_filter(
-            $this->fields,
-            static fn (Field $field): bool => $field instanceof FileField
-        ));
+        foreach ($this->fileFieldsForDisk($sourceField) as $fileField) {
+            if (
+                $fileField->name() !== $sourceField->name()
+                && $this->pathValue($model->getAttribute($fileField->name())) === $path
+            ) {
+                return true;
+            }
+        }
+
+        $fileFields = $this->fileFieldsForDisk($sourceField);
 
         if ($fileFields === []) {
             return false;
@@ -148,6 +217,10 @@ final class FileLifecycleManager
                 $query->whereKeyNot($model->getKey());
             }
 
+            if (in_array(SoftDeletes::class, class_uses_recursive($model), true)) {
+                $query->withoutGlobalScope(SoftDeletingScope::class);
+            }
+
             $query->where(function ($nestedQuery) use ($fileFields, $path): void {
                 foreach ($fileFields as $index => $fileField) {
                     $method = $index === 0 ? 'where' : 'orWhere';
@@ -156,9 +229,36 @@ final class FileLifecycleManager
             });
 
             return $query->exists();
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            Log::warning('File reference lookup failed; preserving file.', [
+                'model' => $model::class,
+                'field' => $sourceField->name(),
+                'disk' => $sourceField->getDisk(),
+                'exception' => $exception::class,
+            ]);
+
             return true;
         }
+    }
+
+    /**
+     * @return array<int, FileField>
+     */
+    private function fileFieldsForDisk(FileField $sourceField): array
+    {
+        return array_values(array_filter(
+            $this->fields,
+            static fn (Field $field): bool => $field instanceof FileField
+                && $field->getDisk() === $sourceField->getDisk()
+        ));
+    }
+
+    private function logCleanupFailure(string $message, string $disk, ?Throwable $exception = null): void
+    {
+        Log::warning($message, [
+            'disk' => $disk,
+            'exception' => $exception instanceof Throwable ? $exception::class : null,
+        ]);
     }
 
     private function pathValue(mixed $value): ?string

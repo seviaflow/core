@@ -46,6 +46,7 @@ final class ResourceOperationService
     ): Model {
         $fileLifecycle = new FileLifecycleManager($fields);
         $resolvedResourceClass = $this->resolveResourceClass($model, $resourceClass);
+        $fileLifecycle->registerRollbackCallback($model);
 
         try {
             return $this->transaction($model, function () use ($model, $fields, $values, $context, $fileLifecycle, $resolvedResourceClass, $state): Model {
@@ -85,6 +86,7 @@ final class ResourceOperationService
         ?FormState $state = null,
     ): Model {
         $fileLifecycle ??= new FileLifecycleManager($fields);
+        $fileLifecycle->registerRollbackCallback($model);
 
         try {
             return $this->transaction($model, function () use (
