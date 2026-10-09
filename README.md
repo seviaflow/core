@@ -24,7 +24,9 @@ role revocation takes effect without relying on a stale mounted component.
 
 ## Installation Status
 
-SeviaFlow is pre-release. The `main` branch is aliased as `0.1.x-dev`; the first stable tag is expected to start at `0.1.0`.
+SeviaFlow is pre-release and this repository currently declares `license: proprietary`. Core has no Hub token, paid API or licensing adapter dependency, but that technical profile is not an open-source grant or proof that public distribution is already authorized. Use an authorized Composer source until the owner publishes the applicable terms.
+
+The intended Core headless profile is a no-Hub, no-API installation. Public availability, no-cost rights, support scope and the first stable tag remain owner decisions.
 
 ```bash
 composer require seviaflow/core:^0.1@dev
