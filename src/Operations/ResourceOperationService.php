@@ -50,8 +50,11 @@ final class ResourceOperationService
         ?FormState $state = null,
         ?string $expectedRevision = null,
     ): Model {
-        $fileLifecycle = new FileLifecycleManager($fields);
         $resolvedResourceClass = $this->resolveResourceClass($model, $resourceClass);
+        $fileLifecycle = new FileLifecycleManager(
+            $fields,
+            $resolvedResourceClass === null ? $fields : $this->fieldsForResource($resolvedResourceClass),
+        );
         $fileLifecycle->registerRollbackCallback($model);
 
         try {
@@ -95,7 +98,10 @@ final class ResourceOperationService
         ?FileLifecycleManager $fileLifecycle = null,
         ?FormState $state = null,
     ): Model {
-        $fileLifecycle ??= new FileLifecycleManager($fields);
+        $fileLifecycle ??= new FileLifecycleManager(
+            $fields,
+            $this->fieldsForResource($resourceClass),
+        );
         $fileLifecycle->registerRollbackCallback($model);
 
         try {

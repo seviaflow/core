@@ -4,7 +4,7 @@ SeviaFlow treats a managed file as the pair `(disk, path)`. A path is eligible f
 
 ## Supported references
 
-`FileLifecycleManager` checks every `FileField` passed for the current resource:
+`FileLifecycleManager` receives the fields allowed for the current mutation separately from the full `FileField` reference catalog for the resource. It checks every field in that catalog:
 
 - another field on the same model instance;
 - another row of the same model on the same disk;

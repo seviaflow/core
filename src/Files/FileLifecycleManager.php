@@ -36,8 +36,19 @@ final class FileLifecycleManager
 
     /**
      * @param  array<int, Field>  $fields
+     * @param  array<int, Field>|null  $referenceFields
      */
-    public function __construct(private readonly array $fields = []) {}
+    public function __construct(
+        private readonly array $fields = [],
+        ?array $referenceFields = null,
+    ) {
+        $this->referenceFields = $referenceFields ?? $fields;
+    }
+
+    /**
+     * @var array<int, Field>
+     */
+    private readonly array $referenceFields;
 
     /**
      * @return array{changed:bool, value:mixed}
@@ -247,7 +258,7 @@ final class FileLifecycleManager
     private function fileFieldsForDisk(FileField $sourceField): array
     {
         return array_values(array_filter(
-            $this->fields,
+            $this->referenceFields,
             static fn (Field $field): bool => $field instanceof FileField
                 && $field->getDisk() === $sourceField->getDisk()
         ));

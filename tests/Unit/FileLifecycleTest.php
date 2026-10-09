@@ -186,6 +186,43 @@ it('keeps a file referenced by another file field on the same record', function 
     Storage::disk('public')->assertMissing('documents/same-record.pdf');
 });
 
+it('uses the full resource catalog when the write fields are partial', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('documents/partial-catalog.pdf', 'shared');
+    $record = FileLifecycleRecord::query()->create([
+        'name' => 'Partial catalog',
+        'document_path' => 'documents/partial-catalog.pdf',
+        'thumbnail_path' => 'documents/partial-catalog.pdf',
+    ]);
+    $documentField = FileLifecycleResource::form(new Form)->getAllFields()[1];
+    $thumbnailField = FileLifecycleResource::form(new Form)->getAllFields()[2];
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $record,
+        fields: [$documentField],
+        values: ['document_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'api'),
+    );
+
+    Storage::disk('public')->assertExists('documents/partial-catalog.pdf');
+    expect($record->fresh()?->document_path)->toBeNull();
+
+    (new ResourceOperationService)->execute(
+        resourceClass: FileLifecycleResource::class,
+        resourceSlug: 'file-lifecycle',
+        model: $record->fresh(),
+        fields: [$thumbnailField],
+        values: ['thumbnail_path' => 'remove'],
+        context: ResourceContext::Edit,
+        operationContext: new ResourceOperationContext(source: 'api'),
+    );
+
+    Storage::disk('public')->assertMissing('documents/partial-catalog.pdf');
+});
+
 it('does not treat the same path on another disk as a reference', function (): void {
     Storage::fake('public');
     Storage::fake('local');
