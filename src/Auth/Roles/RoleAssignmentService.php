@@ -6,6 +6,7 @@ namespace SeviaFlow\Core\Auth\Roles;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use SeviaFlow\Core\Events\Auth\RoleAssignmentsChanged;
 
 final class RoleAssignmentService
 {
@@ -27,7 +28,7 @@ final class RoleAssignmentService
     /**
      * @param  array<int, int|string>  $roleIds
      */
-    public function syncRoles(Model $user, array $roleIds): void
+    public function syncRoles(Model $user, array $roleIds, array $context = []): void
     {
         $normalized = array_values(array_unique(array_map(static fn (int|string $id): int => (int) $id, $roleIds)));
         $existingRoleIds = Role::query()
@@ -43,6 +44,8 @@ final class RoleAssignmentService
             ->delete();
 
         if ($existingRoleIds === []) {
+            $this->dispatchChanged($user, $context);
+
             return;
         }
 
@@ -67,5 +70,17 @@ final class RoleAssignmentService
                 'model_id' => $user->getKey(),
             ]);
         }
+
+        $this->dispatchChanged($user, $context);
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function dispatchChanged(Model $user, array $context): void
+    {
+        event(new RoleAssignmentsChanged($user, array_merge([
+            'connection' => $user->getConnectionName(),
+        ], $context)));
     }
 }
