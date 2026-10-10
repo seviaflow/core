@@ -24,9 +24,9 @@ role revocation takes effect without relying on a stale mounted component.
 
 ## Installation Status
 
-SeviaFlow is pre-release and this repository currently declares `license: proprietary`. Core has no Hub token, paid API or licensing adapter dependency, but that technical profile is not an open-source grant or proof that public distribution is already authorized. Use an authorized Composer source until the owner publishes the applicable terms.
+SeviaFlow is pre-release and this repository currently declares `license: proprietary`. Core has no Hub token, API or licensing adapter dependency, but that technical profile is not an open-source grant or proof that public distribution is already authorized. Use an authorized Composer source until the owner publishes the applicable terms.
 
-The intended Core headless profile is a no-Hub, no-API installation. Public availability, no-cost rights, support scope and the first stable tag remain owner decisions.
+The intended Core headless profile is a no-Hub, no-API installation. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. Usage-license rights, publication, support scope and the first stable tag remain release decisions.
 
 ```bash
 composer require seviaflow/core:^0.1@dev
@@ -47,3 +47,7 @@ composer validate --strict
 composer update
 composer check
 ```
+
+## Free edition scope
+
+Core, UI, API, DevTools and Framework are free. API requires no paid license or runtime Hub activation. Copilot remains an optional paid module and is excluded from the free edition. Price zero does not change the current proprietary usage terms or publish private source repositories.
