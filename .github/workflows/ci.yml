@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - php: '8.2'
-            testbench: '^9.0'
-            pest: '^2.36'
-            plugin: '^2.4'
+            testbench: '^10.0'
+            pest: '^3.7'
+            plugin: '^3.2'
           - php: '8.3'
             testbench: '^10.0'
             pest: '^3.7'

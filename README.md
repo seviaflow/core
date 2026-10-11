@@ -4,6 +4,10 @@ Composer package: `seviaflow/core`
 
 Repository: `https://github.com/seviaflow/core`
 
+## Beta compatibility
+
+The free beta supports Laravel 12 on PHP 8.2+ and Laravel 13 on PHP 8.3+. Laravel 11 is outside this beta's support scope; its security support ended on March 12, 2026. CI covers these framework targets. Package unit tests use SQLite; the Northstar integration and browser suites use MariaDB 10.11. PostgreSQL is not yet a verified beta target.
+
 Core owns the package-neutral SeviaFlow data/resource engine: resources, forms, tables, workflows, permissions, events, import/export primitives and extension contracts.
 
 Core intentionally has no Livewire dependency and does not register UI or API routes.
