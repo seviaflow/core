@@ -10,6 +10,22 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.2'
+            testbench: '^10.0'
+            pest: '^3.7'
+            plugin: '^3.2'
+          - php: '8.3'
+            testbench: '^10.0'
+            pest: '^3.7'
+            plugin: '^3.2'
+          - php: '8.3'
+            testbench: '^11.0'
+            pest: '^4.4'
+            plugin: '^4.1'
 
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +34,14 @@ jobs:
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php }}
           extensions: sqlite, pdo_sqlite
           coverage: none
 
       - run: composer validate --strict
+      - name: Select Laravel test compatibility target
+        run: |
+          composer require --dev --no-update "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}" "pestphp/pest-plugin-laravel:${{ matrix.plugin }}"
+
       - run: composer install --no-interaction --prefer-dist --no-progress
       - run: composer check

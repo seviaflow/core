@@ -4,6 +4,10 @@ Composer package: `seviaflow/core`
 
 Repository: `https://github.com/seviaflow/core`
 
+## Beta compatibility
+
+The free beta supports Laravel 12 on PHP 8.2+ and Laravel 13 on PHP 8.3+. Laravel 11 is outside this beta's support scope; its security support ended on March 12, 2026. CI covers these framework targets. Package unit tests use SQLite; the Northstar integration and browser suites use MariaDB 10.11. PostgreSQL is not yet a verified beta target.
+
 Core owns the package-neutral SeviaFlow data/resource engine: resources, forms, tables, workflows, permissions, events, import/export primitives and extension contracts.
 
 Core intentionally has no Livewire dependency and does not register UI or API routes.
@@ -24,9 +28,9 @@ role revocation takes effect without relying on a stale mounted component.
 
 ## Installation Status
 
-SeviaFlow is pre-release and this repository currently declares `license: proprietary`. Core has no Hub token, API or licensing adapter dependency, but that technical profile is not an open-source grant or proof that public distribution is already authorized. Use an authorized Composer source until the owner publishes the applicable terms.
+SeviaFlow is pre-release. This package is licensed under the [MIT License](LICENSE), which permits commercial use, modification and redistribution with its copyright and license notice. Release tags, distribution endpoints and support scope are documented separately.
 
-The intended Core headless profile is a no-Hub, no-API installation. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. Usage-license rights, publication, support scope and the first stable tag remain release decisions.
+The intended Core headless profile is a no-Hub, no-API installation. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. MIT usage rights apply to this package; publication, support scope and the first stable tag remain release decisions.
 
 ```bash
 composer require seviaflow/core:^0.1@dev
@@ -50,4 +54,4 @@ composer check
 
 ## Free edition scope
 
-Core, UI, API, DevTools and Framework are free. API requires no paid license or runtime Hub activation. Copilot remains an optional paid module and is excluded from the free edition. Price zero does not change the current proprietary usage terms or publish private source repositories.
+Core, UI, API, DevTools and Framework are free. API requires no paid license or runtime Hub activation. Copilot remains an optional paid module and is excluded from the free edition. The five free packages use MIT; Copilot retains its separate license. Repository visibility and published artifacts are separate from the usage license.

@@ -3,23 +3,23 @@
     "description": "SeviaFlow core resource, form, table and workflow primitives.",
     "type": "library",
     "homepage": "https://github.com/seviaflow/core",
-    "license": "proprietary",
+    "license": "MIT",
     "support": {
         "issues": "https://github.com/seviaflow/core/issues",
         "source": "https://github.com/seviaflow/core"
     },
     "require": {
         "php": "^8.2",
-        "illuminate/filesystem": "^11.0|^12.0|^13.0",
-        "illuminate/support": "^11.0|^12.0|^13.0",
-        "illuminate/database": "^11.0|^12.0|^13.0"
+        "illuminate/filesystem": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0"
     },
     "require-dev": {
     "larastan/larastan": "^3.10",
         "laravel/pint": "^1.17",
-        "orchestra/testbench": "^9.0|^10.0|^11.0",
-        "pestphp/pest": "^2.36|^3.7",
-        "pestphp/pest-plugin-laravel": "^2.4|^3.2"
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^3.7|^4.4",
+        "pestphp/pest-plugin-laravel": "^3.2|^4.1"
     },
     "autoload": {
         "psr-4": {
