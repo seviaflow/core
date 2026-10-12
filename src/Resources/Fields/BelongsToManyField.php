@@ -128,7 +128,7 @@ final class BelongsToManyField extends MultiSelectField
             throw ValidationException::withMessages([$this->name() => 'One or more selected records are not available.']);
         }
         // Preserve links outside the editable scope instead of silently detaching them.
-        $current = array_map(static fn (mixed $id): string => (string) $id, $relation->pluck($relation->getRelated()->qualifyColumn($key))->all());
+        $current = array_map(static fn (mixed $id): string => (string) $id, $relation->newPivotQuery()->pluck($relation->getRelatedPivotKeyName())->all());
         $editable = $this->valueForRecord($model);
         $relation->sync(array_values(array_unique(array_merge(array_diff($current, $editable), $ids))));
         $model->unsetRelation($this->getRelationshipName());
