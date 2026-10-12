@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Schema\Blueprint;
@@ -82,6 +83,17 @@ it('validates list shape, relation scope, limits and disabled field persistence'
     expect($model->labels()->count())->toBe(0);
 });
 
+it('preserves links hidden by related-model global scopes', function (): void {
+    $visible = ManyFieldLabel::query()->create(['name' => 'Visible']);
+    $hidden = ManyFieldLabel::query()->create(['name' => 'Hidden', 'allowed' => false]);
+    $model = ManyFieldRecord::query()->create(['name' => 'Record']);
+    $model->labels()->attach([$visible->getKey(), $hidden->getKey()]);
+    $field = BelongsToManyField::make('scoped_labels')->relationship('scopedLabels', 'name');
+    expect($field->valueForRecord($model))->toBe([(string) $visible->getKey()]);
+    $field->sync($model, []);
+    expect($model->labels()->pluck('many_field_labels.id')->all())->toBe([$hidden->getKey()]);
+});
+
 final class ManyFieldRecord extends Model
 {
     protected $table = 'many_field_records';
@@ -89,6 +101,11 @@ final class ManyFieldRecord extends Model
     protected $guarded = [];
 
     public $timestamps = false;
+
+    public function scopedLabels(): BelongsToMany
+    {
+        return $this->belongsToMany(ManyScopedFieldLabel::class, 'many_field_pivot', 'record_id', 'label_id');
+    }
 
     public function labels(): BelongsToMany
     {
@@ -103,4 +120,18 @@ final class ManyFieldLabel extends Model
     protected $guarded = [];
 
     public $timestamps = false;
+}
+
+final class ManyScopedFieldLabel extends Model
+{
+    protected $table = 'many_field_labels';
+
+    protected $guarded = [];
+
+    public $timestamps = false;
+
+    protected static function booted(): void
+    {
+        self::addGlobalScope('visible', static fn (Builder $query) => $query->where('allowed', true));
+    }
 }
