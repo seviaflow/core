@@ -6,13 +6,15 @@ namespace SeviaFlow\Core\Resources\Fields;
 
 use Closure;
 use Illuminate\Database\Eloquent\Model;
+use SeviaFlow\Core\Forms\FormState;
+use SeviaFlow\Core\Forms\FormValidationRules;
 use SeviaFlow\Core\Resources\ResourceContext;
 
 final class RepeaterField extends Field
 {
     protected static string $type = 'repeater';
 
-    private const ALLOWED_ITEM_TYPES = ['text', 'number', 'money', 'select', 'toggle'];
+    private const ALLOWED_ITEM_TYPES = ['text', 'number', 'money', 'select', 'toggle', 'textarea', 'date', 'datetime', 'time', 'email', 'url', 'phone', 'radio-group', 'color'];
 
     /**
      * @var array<int, Field>
@@ -365,24 +367,33 @@ final class RepeaterField extends Field
         ?string $modelClass = null,
         array $fieldValues = []
     ): array {
-        $resolvedContext = $context instanceof ResourceContext
-            ? $context
-            : ResourceContext::Create;
-        $rules = [];
-
-        foreach ($this->itemFields as $field) {
-            $fieldRules = $field->getRulesForContext($resolvedContext, $record);
-            if (! $this->containsRule($fieldRules, 'required') && ! $this->containsRule($fieldRules, 'nullable')) {
-                $fieldRules[] = 'nullable';
-            }
-
-            if ($field->usesDefaultValidation()) {
-                foreach ($field->defaultValidationRules($resolvedContext, $record, $modelClass, $fieldValues) as $rule) {
-                    $this->appendRuleIfMissing($fieldRules, $rule);
+        $resolvedContext = $context instanceof ResourceContext ? $context : ResourceContext::Create;
+        $items = $fieldValues[$this->name()] ?? [];
+        if (! is_array($items) || $items === []) {
+            $rules = [];
+            foreach ($this->itemFields as $field) {
+                $fieldRules = $field->getRulesForContext($resolvedContext, $record);
+                if (! $field->isRequired($resolvedContext)) {
+                    $fieldRules[] = 'nullable';
                 }
+                if ($field->usesDefaultValidation()) {
+                    $fieldRules = array_merge($fieldRules, $field->defaultValidationRules($resolvedContext, $record, null, []));
+                }
+                $rules['*.'.$field->name()] = $fieldRules;
             }
 
-            $rules['*.'.$field->name()] = $fieldRules;
+            return $rules;
+        }
+        $rules = [];
+        foreach ($items as $index => $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $state = new FormState($item, $resolvedContext, $record instanceof Model ? $record : null);
+            $rowRules = (new FormValidationRules)->build($this->itemFields, $resolvedContext, null, 'row', $item, null, $state);
+            foreach ($rowRules as $key => $value) {
+                $rules[$index.'.'.substr($key, 4)] = $value;
+            }
         }
 
         return $rules;
@@ -451,36 +462,6 @@ final class RepeaterField extends Field
                     implode(', ', array_map(static fn (mixed $name): string => (string) $name, $unknown))
                 ));
             }
-        }
-    }
-
-    /**
-     * @param  array<int, mixed>  $rules
-     */
-    private function containsRule(array $rules, string $needle): bool
-    {
-        foreach ($rules as $rule) {
-            if (is_string($rule) && strtolower($rule) === strtolower($needle)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @param  array<int, mixed>  $rules
-     */
-    private function appendRuleIfMissing(array &$rules, mixed $rule): void
-    {
-        if (is_string($rule) && ! $this->containsRule($rules, $rule)) {
-            $rules[] = $rule;
-
-            return;
-        }
-
-        if (! is_string($rule)) {
-            $rules[] = $rule;
         }
     }
 }

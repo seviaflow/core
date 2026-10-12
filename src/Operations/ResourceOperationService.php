@@ -14,6 +14,7 @@ use SeviaFlow\Core\Files\FileLifecycleManager;
 use SeviaFlow\Core\Forms\FieldValueNormalizer;
 use SeviaFlow\Core\Forms\FormFields;
 use SeviaFlow\Core\Forms\FormState;
+use SeviaFlow\Core\Resources\Fields\BelongsToManyField;
 use SeviaFlow\Core\Resources\Fields\Field;
 use SeviaFlow\Core\Resources\Fields\FileField;
 use SeviaFlow\Core\Resources\Fields\PasswordField;
@@ -70,6 +71,7 @@ final class ResourceOperationService
 
                 $this->applyValues($operationModel, $fields, $values, $context, $fileLifecycle, $state);
                 $operationModel->save();
+                $this->syncRelations($operationModel, $fields, $values, $context, $state);
                 $fileLifecycle->finalize($operationModel);
 
                 return $operationModel;
@@ -152,6 +154,7 @@ final class ResourceOperationService
                     $operationModel->save();
                 }
 
+                $this->syncRelations($operationModel, $fields, $values, $context, $state);
                 $fileLifecycle->finalize($operationModel);
                 $this->resourceEventDispatcher->dispatchAfterCommit(
                     resourceClass: $resourceClass,
@@ -175,6 +178,19 @@ final class ResourceOperationService
             $fileLifecycle->rollback();
 
             throw $exception;
+        }
+    }
+
+    /**
+     * @param  array<int, Field>  $fields
+     * @param  array<string, mixed>  $values
+     */
+    private function syncRelations(Model $model, array $fields, array $values, ResourceContext $context, ?FormState $state): void
+    {
+        foreach ($this->formFields->persistable($fields, $context, $state) as $field) {
+            if ($field instanceof BelongsToManyField && array_key_exists($field->name(), $values)) {
+                $field->sync($model, $values[$field->name()]);
+            }
         }
     }
 
@@ -212,6 +228,11 @@ final class ResourceOperationService
                     continue;
                 }
 
+                if ($fieldMap[$name] instanceof BelongsToManyField) {
+                    $changes[$name] = $fieldMap[$name]->normalizeValue($value);
+
+                    continue;
+                }
                 if ($fieldMap[$name] instanceof FileField) {
                     if ($fileLifecycle === null && ! ($value instanceof UploadedFile)) {
                         continue;

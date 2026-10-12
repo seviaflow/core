@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use InvalidArgumentException;
 use SeviaFlow\Core\Resources\Fields\BelongsToField;
+use SeviaFlow\Core\Resources\Fields\BelongsToManyField;
 use SeviaFlow\Core\Resources\Fields\Field;
 
 final class BelongsToFieldOptions
@@ -26,6 +27,12 @@ final class BelongsToFieldOptions
         $options = [];
 
         foreach ($fields as $field) {
+            if ($field instanceof BelongsToManyField) {
+                $selected = $fieldValues[$field->name()] ?? [];
+                $options[$field->name()] = $field->resolveOptions($model, (string) ($searchTerms[$field->name()] ?? ''), is_array($selected) ? $selected : []);
+
+                continue;
+            }
             if (! $field instanceof BelongsToField) {
                 continue;
             }

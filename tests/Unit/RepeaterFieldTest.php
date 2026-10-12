@@ -3,12 +3,16 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Validator;
+use SeviaFlow\Core\Forms\FormState;
 use SeviaFlow\Core\Forms\FormStateInitializer;
 use SeviaFlow\Core\Forms\FormValidationRules;
+use SeviaFlow\Core\Resources\Fields\DateField;
+use SeviaFlow\Core\Resources\Fields\EmailField;
 use SeviaFlow\Core\Resources\Fields\MoneyField;
 use SeviaFlow\Core\Resources\Fields\NumberField;
 use SeviaFlow\Core\Resources\Fields\RepeaterField;
 use SeviaFlow\Core\Resources\Fields\SelectField;
+use SeviaFlow\Core\Resources\Fields\TextareaField;
 use SeviaFlow\Core\Resources\Fields\TextField;
 use SeviaFlow\Core\Resources\Fields\ToggleField;
 use SeviaFlow\Core\Resources\ResourceContext;
@@ -99,4 +103,28 @@ it('rejects unsupported nested field types at definition time', function (): voi
     expect(fn () => RepeaterField::make('items')->fields([
         RepeaterField::make('nested'),
     ]))->toThrow(InvalidArgumentException::class, 'unsupported type');
+});
+
+it('validates new scalar types and dependent options separately for each row', function (): void {
+    $field = RepeaterField::make('contacts')->fields([
+        TextareaField::make('notes'),
+        DateField::make('date')->required(),
+        EmailField::make('email')->required(),
+        SelectField::make('country')->options(['PL' => 'Poland', 'NO' => 'Norway']),
+        SelectField::make('city')->dependsOn('country')->options(static fn (FormState $state): array => $state->value('country') === 'PL' ? ['byd' => 'Bydgoszcz'] : ['osl' => 'Oslo']
+        ),
+    ]);
+    $values = ['contacts' => [
+        ['notes' => '  Notes  ', 'date' => '2026-10-12', 'email' => 'a@example.com', 'country' => 'PL', 'city' => 'byd'],
+        ['date' => '2026-10-13', 'email' => 'b@example.com', 'country' => 'NO', 'city' => 'osl'],
+    ]];
+    $rules = (new FormValidationRules)->build([$field], ResourceContext::Create, fieldValues: $values);
+    expect(Validator::make(['fieldValues' => $values], $rules)->passes())->toBeTrue()
+        ->and($field->normalizeValue($values['contacts'])[0]['notes'])->toBe('Notes');
+    $values['contacts'][0]['city'] = 'osl';
+    $values['contacts'][1]['email'] = 'invalid';
+    $rules = (new FormValidationRules)->build([$field], ResourceContext::Create, fieldValues: $values);
+    $validator = Validator::make(['fieldValues' => $values], $rules);
+    expect($validator->errors()->has('fieldValues.contacts.0.city'))->toBeTrue()
+        ->and($validator->errors()->has('fieldValues.contacts.1.email'))->toBeTrue();
 });

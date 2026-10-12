@@ -4,41 +4,23 @@ declare(strict_types=1);
 
 namespace SeviaFlow\Core\Resources\Fields;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
+use SeviaFlow\Core\Forms\FormState;
+use SeviaFlow\Core\Resources\Fields\Concerns\HasSelectOptions;
 use SeviaFlow\Core\Resources\ResourceContext;
 
 final class SelectField extends Field
 {
+    use HasSelectOptions;
+
     protected static string $type = 'select';
-
-    /**
-     * @var array<array-key, string>
-     */
-    private array $options = [];
-
-    /**
-     * @param  array<array-key, string>  $options
-     */
-    public function options(array $options): static
-    {
-        $this->options = $options;
-
-        return $this;
-    }
-
-    /**
-     * @return array<array-key, string>
-     */
-    public function getOptions(): array
-    {
-        return $this->options;
-    }
 
     protected function defaultApiSchema(): array
     {
         return [
             'type' => 'string',
-            'enum' => array_values(array_map(static fn (mixed $value): string => (string) $value, array_keys($this->options))),
+            ...($this->hasDynamicOptions() ? [] : ['enum' => array_values(array_map(static fn (mixed $value): string => (string) $value, array_keys($this->getOptions())))]),
             'nullable' => true,
         ];
     }
@@ -49,6 +31,6 @@ final class SelectField extends Field
         ?string $modelClass = null,
         array $fieldValues = []
     ): array {
-        return [Rule::in(array_keys($this->options))];
+        return [Rule::in($this->getSelectableOptionKeys(new FormState($fieldValues, $context instanceof ResourceContext ? $context : ResourceContext::Create, $record instanceof Model ? $record : null)))];
     }
 }
