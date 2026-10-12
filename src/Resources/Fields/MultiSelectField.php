@@ -6,38 +6,24 @@ namespace SeviaFlow\Core\Resources\Fields;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\Rule;
+use SeviaFlow\Core\Forms\FormState;
+use SeviaFlow\Core\Resources\Fields\Concerns\HasSelectOptions;
 use SeviaFlow\Core\Resources\ResourceContext;
 
-final class MultiSelectField extends Field
+class MultiSelectField extends Field
 {
+    use HasSelectOptions;
+
     protected static string $type = 'multiselect';
 
-    /**
-     * @var array<array-key, string>
-     */
-    private array $options = [];
+    public static function make(string $name): static
+    {
+        return parent::make($name)->searchable();
+    }
 
     private ?int $minSelected = null;
 
     private ?int $maxSelected = null;
-
-    /**
-     * @param  array<array-key, string>  $options
-     */
-    public function options(array $options): static
-    {
-        $this->options = $options;
-
-        return $this;
-    }
-
-    /**
-     * @return array<array-key, string>
-     */
-    public function getOptions(): array
-    {
-        return $this->options;
-    }
 
     protected function defaultApiSchema(): array
     {
@@ -45,7 +31,7 @@ final class MultiSelectField extends Field
             'type' => 'array',
             'items' => [
                 'type' => 'string',
-                'enum' => array_values(array_map(static fn (mixed $value): string => (string) $value, array_keys($this->options))),
+                ...($this->hasDynamicOptions() ? [] : ['enum' => array_values(array_map(static fn (mixed $value): string => (string) $value, array_keys($this->getOptions())))]),
             ],
             'nullable' => true,
         ];
@@ -155,7 +141,7 @@ final class MultiSelectField extends Field
         array $fieldValues = []
     ): array {
         return [
-            '*' => [Rule::in(array_keys($this->options))],
+            '*' => [Rule::in($this->getSelectableOptionKeys(new FormState($fieldValues, $context instanceof ResourceContext ? $context : ResourceContext::Create, $record instanceof Model ? $record : null)))],
         ];
     }
 }

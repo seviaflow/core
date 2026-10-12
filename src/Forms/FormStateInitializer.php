@@ -6,6 +6,7 @@ namespace SeviaFlow\Core\Forms;
 
 use Illuminate\Database\Eloquent\Model;
 use LogicException;
+use SeviaFlow\Core\Resources\Fields\BelongsToManyField;
 use SeviaFlow\Core\Resources\Fields\CheckboxGroupField;
 use SeviaFlow\Core\Resources\Fields\Field;
 use SeviaFlow\Core\Resources\Fields\FileField;
@@ -37,6 +38,11 @@ final class FormStateInitializer
             $name = $field->name();
             $value = $record?->getAttribute($name);
 
+            if ($field instanceof BelongsToManyField && $record !== null) {
+                $fieldValues[$name] = $field->valueForRecord($record);
+
+                continue;
+            }
             if ($field instanceof PasswordField) {
                 $fieldValues[$name] = '';
 

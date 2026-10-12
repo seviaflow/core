@@ -279,6 +279,13 @@ final class CsvImportExecutor
             )));
         }
 
+        foreach ($bridgedFieldRules as $key => $nestedRules) {
+            $root = explode('.', $key, 2)[0];
+            if ($key !== $root && in_array($root, $allowedFields, true)) {
+                $rules[$key] = $nestedRules;
+            }
+        }
+
         return [
             'rules' => $rules,
             'attributes' => $attributes,
