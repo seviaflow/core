@@ -12,7 +12,8 @@
   <a href="https://seviaflow.io/">Website</a> ·
   <a href="https://seviaflow.io/docs/0.1/why-seviaflow">What is SeviaFlow?</a> ·
   <a href="https://seviaflow.io/docs/0.1/">Documentation</a> ·
-  <a href="https://github.com/seviaflow/core">Source</a>
+  <a href="https://github.com/seviaflow/core">Source</a> ·
+  <a href="https://packagist.org/packages/seviaflow/core">Packagist</a>
 </p>
 
 <p align="center">
@@ -50,7 +51,7 @@ This package is in beta and is licensed under the [MIT License](LICENSE). You ma
 
 Core is the headless profile and can be used on its own. UI, API, DevTools and Framework are optional packages in the free SeviaFlow edition; Copilot is separate.
 
-After this package's beta tag is available on Packagist, install it with:
+Install the Core beta from Packagist:
 
 ```bash
 composer require seviaflow/core:^0.1@beta
