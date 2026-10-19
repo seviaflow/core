@@ -1,7 +1,11 @@
 # Security policy
 
-This package is pre-release and currently distributed under the repository's proprietary terms. Do not disclose a vulnerability in a public issue, pull request or forum post.
+This package is pre-release and licensed under the MIT License. See [LICENSE](LICENSE).
 
-Use the repository owner's configured private vulnerability-reporting channel or an existing authorized private project channel. The public release is blocked until one of those channels is configured and documented with an owner-approved contact. Do not include secrets, tokens, customer data or exploit payloads in an unconfirmed channel.
+## Report a vulnerability
 
-Supported versions and response targets are not yet committed. The release owner must publish them together with the final distribution terms.
+Do not disclose vulnerabilities in public issues, pull requests, or forums. Private vulnerability reporting must be enabled for this repository before its first public release. Once enabled, use GitHub's private vulnerability reporting feature.
+
+## Supported versions
+
+No stable versions are supported yet. Beta compatibility is listed in the README. Supported version ranges and response targets will be published with the first stable release.
