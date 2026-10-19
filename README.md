@@ -1,8 +1,26 @@
-# SeviaFlow Core
+<p align="center">
+  <img src="https://seviaflow.io/assets/img/seviaflow-logo.png" alt="SeviaFlow" width="240">
+</p>
 
-Composer package: `seviaflow/core`
+<h1 align="center">SeviaFlow Core</h1>
 
-Repository: `https://github.com/seviaflow/core`
+<p align="center"><strong>Define your data once. Operate it everywhere.</strong></p>
+
+<p align="center">The package-neutral Laravel data engine: define Resources, forms, tables, workflows and permissions in PHP, then add only the runtime surfaces your application needs.</p>
+
+<p align="center">
+  <a href="https://seviaflow.io/">Website</a> ·
+  <a href="https://seviaflow.io/docs/0.1/why-seviaflow">What is SeviaFlow?</a> ·
+  <a href="https://seviaflow.io/docs/0.1/">Documentation</a> ·
+  <a href="https://github.com/seviaflow/core">Source</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-beta-orange?style=flat-square" alt="Beta release">
+  <img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="MIT License">
+</p>
+
+<p align="center"><strong>Composer package:</strong> <code>seviaflow/core</code></p>
 
 ## Beta compatibility
 
@@ -26,14 +44,16 @@ role revocation takes effect without relying on a stale mounted component.
 ],
 ```
 
-## Installation Status
+## Installation
 
-SeviaFlow is pre-release. This package is licensed under the [MIT License](LICENSE), which permits commercial use, modification and redistribution with its copyright and license notice. Release tags, distribution endpoints and support scope are documented separately.
+This package is in beta and is licensed under the [MIT License](LICENSE). You may use, modify and redistribute it with the license notice. Beta APIs and compatibility may change before a stable release.
 
-The intended Core headless profile depends on Core alone. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. MIT usage rights apply to this package; publication, support scope and the first stable tag remain release decisions.
+Core is the headless profile and can be used on its own. UI, API, DevTools and Framework are optional packages in the free SeviaFlow edition; Copilot is separate.
+
+After this package's beta tag is available on Packagist, install it with:
 
 ```bash
-composer require seviaflow/core:^0.1@dev
+composer require seviaflow/core:^0.1@beta
 ```
 
 ## Dependencies
