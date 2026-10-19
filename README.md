@@ -30,7 +30,7 @@ role revocation takes effect without relying on a stale mounted component.
 
 SeviaFlow is pre-release. This package is licensed under the [MIT License](LICENSE), which permits commercial use, modification and redistribution with its copyright and license notice. Release tags, distribution endpoints and support scope are documented separately.
 
-The intended Core headless profile is a no-Hub, no-API installation. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. MIT usage rights apply to this package; publication, support scope and the first stable tag remain release decisions.
+The intended Core headless profile depends on Core alone. The owner approved the free Core/UI/API/DevTools/Framework edition on 2026-10-10. MIT usage rights apply to this package; publication, support scope and the first stable tag remain release decisions.
 
 ```bash
 composer require seviaflow/core:^0.1@dev
@@ -54,4 +54,4 @@ composer check
 
 ## Free edition scope
 
-Core, UI, API, DevTools and Framework are free. API requires no paid license or runtime Hub activation. Copilot remains an optional paid module and is excluded from the free edition. The five free packages use MIT; Copilot retains its separate license. Repository visibility and published artifacts are separate from the usage license.
+Core, UI, API, DevTools and Framework are part of the free edition. Copilot is an optional paid module and is excluded. These five packages use MIT; Copilot has a separate license.
