@@ -86,6 +86,18 @@ final class ConfigurationRegistryTest extends TestCase
         $this->registry()->validateChanges('sample', ['limit' => 100], new User);
     }
 
+    public function test_list_item_validation_and_nullable_defaults(): void
+    {
+        $this->registry()->registerApplication('sample', [
+            new SettingDefinition('operations', SettingType::List, [], itemRules: ['string', 'in:get,list'], writeAbility: 'write'),
+            new SettingDefinition('optional', SettingType::String, null, nullable: true, rules: ['max:20']),
+        ]);
+        Gate::define('write', fn ($user): bool => true);
+        $this->assertNull($this->registry()->runtime('sample')['optional']);
+        $this->expectException(ValidationException::class);
+        $this->registry()->validateChanges('sample', ['operations' => ['sql']], new User);
+    }
+
     public function test_duplicate_modules_fail_instead_of_overriding_permissions(): void
     {
         $this->registry()->registerApplication('sample', []);

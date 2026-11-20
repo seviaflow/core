@@ -13,7 +13,7 @@ use Illuminate\Contracts\Validation\Factory;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
-use SeviaFlow\Core\Resources\Resource;
+use SeviaFlow\Core\Resources\Resource as SeviaResource;
 
 /**
  * Definitions only: no database storage and no HTTP endpoints.
@@ -25,7 +25,7 @@ final class ConfigurationRegistry
     /** @var array<string, array<string, array<string, SettingDefinition>>> */
     private array $definitions = ['application' => [], 'resource' => []];
 
-    /** @var array<string, Closure(class-string<Resource>):array<string, mixed>> */
+    /** @var array<string, Closure(class-string<SeviaResource>):array<string, mixed>> */
     private array $resolvers = [];
 
     public function __construct(
@@ -42,7 +42,7 @@ final class ConfigurationRegistry
 
     /**
      * @param  array<int, SettingDefinition>  $definitions
-     * @param  Closure(class-string<Resource>):array<string, mixed>  $resolver
+     * @param  Closure(class-string<SeviaResource>):array<string, mixed>  $resolver
      */
     public function registerResource(string $module, array $definitions, Closure $resolver): void
     {
@@ -64,7 +64,7 @@ final class ConfigurationRegistry
      * Privileged runtime read: validates values and returns secrets unmasked.
      * Never expose this method directly through an API, MCP or UI controller.
      *
-     * @param  class-string<Resource>|null  $resource
+     * @param  class-string<SeviaResource>|null  $resource
      * @return array<string, mixed>
      */
     public function runtime(string $module, ?string $resource = null): array
@@ -87,7 +87,7 @@ final class ConfigurationRegistry
     /**
      * Safe metadata for form generators. Secrets never include a default.
      *
-     * @param  class-string<Resource>|null  $resource
+     * @param  class-string<SeviaResource>|null  $resource
      * @return array<string, array<string, mixed>>
      */
     public function describe(string $module, ?Authenticatable $actor, ?string $resource = null): array
@@ -114,7 +114,7 @@ final class ConfigurationRegistry
     }
 
     /**
-     * @param  class-string<Resource>|null  $resource
+     * @param  class-string<SeviaResource>|null  $resource
      * @return array<string, mixed>
      */
     public function values(string $module, ?Authenticatable $actor, ?string $resource = null): array
@@ -136,7 +136,7 @@ final class ConfigurationRegistry
      * Validate an authorized patch; returns only supplied keys. Does not persist.
      *
      * @param  array<string, mixed>  $changes
-     * @param  class-string<Resource>|null  $resource
+     * @param  class-string<SeviaResource>|null  $resource
      * @return array<string, mixed>
      */
     public function validateChanges(string $module, array $changes, ?Authenticatable $actor, ?string $resource = null): array
@@ -170,12 +170,12 @@ final class ConfigurationRegistry
     }
 
     /**
-     * @param  class-string<Resource>|null  $resource
+     * @param  class-string<SeviaResource>|null  $resource
      * @return array<string, SettingDefinition>
      */
     private function getDefinitions(string $module, ?string $resource): array
     {
-        if ($resource !== null && ! is_subclass_of($resource, Resource::class)) {
+        if ($resource !== null && ! is_subclass_of($resource, SeviaResource::class)) {
             throw new InvalidArgumentException('Resource configuration requires a SeviaFlow resource class.');
         }
         $scope = $resource === null ? 'application' : 'resource';
@@ -205,7 +205,14 @@ final class ConfigurationRegistry
                 throw ValidationException::withMessages([$key => 'Invalid setting type.']);
             }
             try {
-                $rules = ['value' => $definition->rules];
+                $typeRule = match ($definition->type) {
+                    SettingType::Boolean => 'boolean',
+                    SettingType::Integer => 'integer',
+                    SettingType::Number => 'numeric',
+                    SettingType::String => 'string',
+                    SettingType::List, SettingType::Map => 'array',
+                };
+                $rules = ['value' => array_merge($definition->nullable ? ['nullable', $typeRule] : [$typeRule], $definition->rules)];
                 if ($definition->itemRules !== []) {
                     $rules['value.*'] = $definition->itemRules;
                 }
@@ -219,7 +226,7 @@ final class ConfigurationRegistry
         return $values;
     }
 
-    /** @param class-string<Resource>|null $resource */
+    /** @param class-string<SeviaResource>|null $resource */
     private function allows(?string $ability, ?Authenticatable $actor, string $module, ?string $resource): bool
     {
         return $actor !== null && $ability !== null
