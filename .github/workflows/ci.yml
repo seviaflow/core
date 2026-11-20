@@ -44,4 +44,6 @@ jobs:
           composer require --dev --no-update "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}" "pestphp/pest-plugin-laravel:${{ matrix.plugin }}"
 
       - run: composer install --no-interaction --prefer-dist --no-progress
-      - run: composer check
+      - run: vendor/bin/pint --test -vvv
+      - run: composer analyse
+      - run: composer test

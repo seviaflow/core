@@ -10,6 +10,7 @@ use SeviaFlow\Core\Analytics\AnalyticsExecutor;
 use SeviaFlow\Core\Analytics\AnalyticsRegistry;
 use SeviaFlow\Core\Auth\AdminAccessGate;
 use SeviaFlow\Core\Auth\Permissions\PermissionChecker;
+use SeviaFlow\Core\Configuration\ConfigurationRegistry;
 use SeviaFlow\Core\Operations\ResourceOperationService;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataCache;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataResolver;
@@ -24,6 +25,7 @@ final class SeviaFlowCoreServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/seviaflow.php', 'seviaflow');
 
+        $this->app->singleton(ConfigurationRegistry::class);
         $this->app->singleton(CapabilityRegistry::class, fn (): CapabilityRegistry => new CapabilityRegistry);
         $this->app->singleton(AnalyticsRegistry::class, fn (): AnalyticsRegistry => new AnalyticsRegistry);
         $this->app->singleton(AnalyticsCompiler::class, fn (): AnalyticsCompiler => new AnalyticsCompiler);
