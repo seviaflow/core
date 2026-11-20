@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SeviaFlow\Core;
 
 use Illuminate\Support\ServiceProvider;
+use SeviaFlow\Core\Configuration\ConfigurationRegistry;
 use SeviaFlow\Core\Analytics\AnalyticsCompiler;
 use SeviaFlow\Core\Analytics\AnalyticsExecutor;
 use SeviaFlow\Core\Analytics\AnalyticsRegistry;
@@ -24,6 +25,7 @@ final class SeviaFlowCoreServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/seviaflow.php', 'seviaflow');
 
+        $this->app->singleton(ConfigurationRegistry::class);
         $this->app->singleton(CapabilityRegistry::class, fn (): CapabilityRegistry => new CapabilityRegistry);
         $this->app->singleton(AnalyticsRegistry::class, fn (): AnalyticsRegistry => new AnalyticsRegistry);
         $this->app->singleton(AnalyticsCompiler::class, fn (): AnalyticsCompiler => new AnalyticsCompiler);
