@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SeviaFlow\Core\Configuration;
 
 use Closure;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Auth\Access\Gate;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Config\Repository;
@@ -24,7 +25,7 @@ final class ConfigurationRegistry
     /** @var array<string, array<string, array<string, SettingDefinition>>> */
     private array $definitions = ['application' => [], 'resource' => []];
 
-    /** @var array<string, Closure(class-string<Resource>): array<string, mixed>> */
+    /** @var array<string, Closure(class-string<Resource>):array<string, mixed>> */
     private array $resolvers = [];
 
     public function __construct(
@@ -41,7 +42,7 @@ final class ConfigurationRegistry
 
     /**
      * @param  array<int, SettingDefinition>  $definitions
-     * @param  Closure(class-string<Resource>): array<string, mixed>  $resolver
+     * @param  Closure(class-string<Resource>):array<string, mixed>  $resolver
      */
     public function registerResource(string $module, array $definitions, Closure $resolver): void
     {
@@ -143,7 +144,7 @@ final class ConfigurationRegistry
         $definitions = $this->getDefinitions($module, $resource);
         foreach ($changes as $key => $value) {
             if (! isset($definitions[$key]) || ! $this->allows($definitions[$key]->writeAbility, $actor, $module, $resource)) {
-                throw new \Illuminate\Auth\Access\AuthorizationException('Setting change is not permitted.');
+                throw new AuthorizationException('Setting change is not permitted.');
             }
         }
 

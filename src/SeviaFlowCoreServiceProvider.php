@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace SeviaFlow\Core;
 
 use Illuminate\Support\ServiceProvider;
-use SeviaFlow\Core\Configuration\ConfigurationRegistry;
 use SeviaFlow\Core\Analytics\AnalyticsCompiler;
 use SeviaFlow\Core\Analytics\AnalyticsExecutor;
 use SeviaFlow\Core\Analytics\AnalyticsRegistry;
 use SeviaFlow\Core\Auth\AdminAccessGate;
 use SeviaFlow\Core\Auth\Permissions\PermissionChecker;
+use SeviaFlow\Core\Configuration\ConfigurationRegistry;
 use SeviaFlow\Core\Operations\ResourceOperationService;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataCache;
 use SeviaFlow\Core\Resources\Metadata\ResourceMetadataResolver;
